@@ -272,6 +272,7 @@ struct GravityBubble: View {
     var gmax: Double = 0.8
     var size: CGFloat = 168
     var isStable: Bool = false
+    var isFelt: Bool = false
 
     var body: some View {
         Canvas { context, sz in
@@ -305,8 +306,8 @@ struct GravityBubble: View {
             context.fill(dotPath, with: .color(dotColor.opacity(0.18)))
             context.stroke(dotPath, with: .color(dotColor), style: StrokeStyle(lineWidth: 1.8))
         }
-        .overlay(alignment: .top)     { Text("accel").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 6) }
-        .overlay(alignment: .bottom)  { Text("brake").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.bottom, 6) }
+        .overlay(alignment: .top)     { Text(isFelt ? "fwd" : "accel").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 6) }
+        .overlay(alignment: .bottom)  { Text(isFelt ? "back" : "brake").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.bottom, 6) }
         .overlay(alignment: .trailing){ Text("R").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.trailing, 4) }
         .overlay(alignment: .leading) { Text("L").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.leading, 4) }
         .frame(width: size, height: size)
@@ -381,10 +382,17 @@ struct GGDiagram: View {
                 : points
             if !showTrail {
                 for p in renderPoints {
-                    let c = pt(p.lat, p.fwd); let dotR: CGFloat = p.isPeak ? 3 : 1.7
+                    let c = pt(p.lat, p.fwd)
+                    let dotR: CGFloat = p.isPeak ? 3 : 1.5
                     var dot = Path()
                     dot.addEllipse(in: CGRect(x: c.x - dotR, y: c.y - dotR, width: dotR * 2, height: dotR * 2))
-                    context.fill(dot, with: p.isPeak ? .color(Color.accentColor) : .color(Color(.secondaryLabel).opacity(0.5)))
+                    if p.isPeak {
+                        context.fill(dot, with: .color(Color.accentColor))
+                    } else {
+                        let mag = min(1.0, (p.lat * p.lat + p.fwd * p.fwd).squareRoot() / gmax)
+                        let dotColor: Color = mag > 0.6 ? .orange : mag > 0.3 ? Color.accentColor : Color(.tertiaryLabel)
+                        context.fill(dot, with: .color(dotColor.opacity(0.45)))
+                    }
                 }
             }
 
@@ -486,8 +494,14 @@ struct AccelStrip: View {
     var color: Color = .accentColor
 
     private var xDomain: ClosedRange<Double> {
-        guard let last = samples.last else { return 0...30 }
-        return max(0, last.elapsedSeconds - 30)...last.elapsedSeconds
+        guard let last = samples.last else { return 0...15 }
+        return max(0, last.elapsedSeconds - 15)...last.elapsedSeconds
+    }
+
+    private var yRange: Double {
+        let maxAbs = samples.map { abs($0[keyPath: value]) }.max() ?? 0
+        let raw = max(1.0, maxAbs * 1.2)
+        return (raw / 0.5).rounded(.up) * 0.5
     }
 
     var body: some View {
@@ -495,7 +509,7 @@ struct AccelStrip: View {
             HStack {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("±2 g").font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
+                Text(String(format: "±%.1f g", yRange)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
             }
             Chart {
                 ForEach(samples) { sample in
@@ -504,8 +518,11 @@ struct AccelStrip: View {
                 }
                 RuleMark(y: .value("zero", 0)).foregroundStyle(Color(.separator)).lineStyle(StrokeStyle(dash: [3, 4]))
             }
-            .chartXScale(domain: xDomain).chartYScale(domain: -2.0...2.0)
-            .chartXAxis(.hidden).chartYAxis(.hidden).frame(height: 42)
+            .chartXScale(domain: xDomain).chartYScale(domain: -yRange...yRange)
+            .chartXAxis(.hidden).chartYAxis(.hidden)
+            .frame(maxWidth: .infinity)
+            .frame(height: 84)
+            .clipped()
             .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
@@ -571,8 +588,9 @@ struct StatusLamp: View {
                 Text(label).font(.body).foregroundStyle(Color(.label))
                 if let detail { Text(detail).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary) }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(EdgeInsets(top: 11, leading: 13, bottom: 11, trailing: 13))
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }

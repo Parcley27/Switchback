@@ -5,162 +5,233 @@
 //  Created by Pierce Oxley on 7/6/26.
 //
 
+import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var motion: MotionManager
+    @Environment(\.modelContext) private var modelContext
     @AppStorage("ds.autoPause") private var autoPause: Bool = true
     @AppStorage("ds.backgroundRecording") private var backgroundRecording: Bool = false
     @AppStorage("ds.showDrivingScore") private var showDrivingScore: Bool = true
+    @AppStorage("ds.feltDirection") private var feltDirection: Bool = false
+    @AppStorage("ds.storeRawData") private var storeRawData: Bool = true
+
+    @State private var needsRecompute = false
+    @State private var showEraseConfirmation = false
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 20) {
+        List {
 
-                // MARK: Recording
-                CardSection("Recording") {
-                    VStack(spacing: 0) {
-                        Toggle(isOn: $motion.suppressVerticalEvents) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Suppress road-surface spikes").font(.body)
-                                Text("Bumps excluded from g-stats; still counted as surface events.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .tint(.green)
-                        Divider().padding(.vertical, 6)
-                        Toggle(isOn: $motion.autoSmooth) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Auto-smooth acceleration").font(.body)
-                                Text("Rolling average filters sensor spikes while preserving real braking and cornering events.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .tint(.green)
-                        if motion.autoSmooth {
-                            Divider().padding(.vertical, 6)
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Smooth window").font(.body)
-                                    Spacer()
-                                    Text(String(format: "%.2f s", motion.autoSmoothWindowSeconds))
-                                        .font(.system(.footnote, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Slider(value: $motion.autoSmoothWindowSeconds, in: 0.10...1.0, step: 0.05)
-                                    .tint(.accentColor)
-                                HStack {
-                                    Text("0.10 s · sensitive").font(.caption2).foregroundStyle(.tertiary)
-                                    Spacer()
-                                    Text("1.0 s · smooth").font(.caption2).foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        Divider().padding(.vertical, 6)
-                        Toggle("Auto-pause when stopped", isOn: $autoPause)
-                            .tint(.green).font(.body)
-                        Divider().padding(.vertical, 6)
-                        Toggle(isOn: $backgroundRecording) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Background recording").font(.body)
-                                Text("Keep logging with the screen off (needs Always location access).")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .tint(.green)
+            // MARK: Recording
+            Section("Recording") {
+                Toggle(isOn: $motion.suppressVerticalEvents) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Suppress road-surface spikes")
+                        Text("Bumps excluded from g-stats; still counted as surface events.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                .tint(.green)
 
-                // MARK: Detection Thresholds
-                CardSection("Detection Thresholds") {
-                    VStack(spacing: 0) {
-
-                        // Hard events
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Hard event").font(.body)
-                                    Text("Acceleration, braking, or cornering above this value is counted as a hard event.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 12)
-                                Text(String(format: "%.2f g", motion.hardThresholdG))
-                                    .font(.system(.headline, design: .monospaced))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            Slider(value: $motion.hardThresholdG, in: 0.15...0.60, step: 0.05)
-                                .tint(Color.accentColor)
-                            HStack {
-                                Text("0.15 g — lenient").font(.caption2).foregroundStyle(.tertiary)
-                                Spacer()
-                                Text("0.60 g — strict").font(.caption2).foregroundStyle(.tertiary)
-                            }
-                        }
-
-                        Divider().padding(.vertical, 12)
-
-                        // Surface events
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Road surface").font(.body)
-                                    Text("Vertical spikes above this value are counted as bumps or potholes.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 12)
-                                Text(String(format: "%.2f g", motion.surfaceThresholdG))
-                                    .font(.system(.headline, design: .monospaced))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            Slider(value: $motion.surfaceThresholdG, in: 0.20...0.80, step: 0.05)
-                                .tint(Color.accentColor)
-                            HStack {
-                                Text("0.20 g — lenient").font(.caption2).foregroundStyle(.tertiary)
-                                Spacer()
-                                Text("0.80 g — strict").font(.caption2).foregroundStyle(.tertiary)
-                            }
-                        }
+                Toggle(isOn: $motion.autoSmooth) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-smooth acceleration")
+                        Text("Rolling average filters sensor spikes while preserving real events.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                .tint(.green)
 
-                // MARK: Driving Score
-                CardSection("Driving Score") {
-                    VStack(spacing: 0) {
-                        Toggle(isOn: $showDrivingScore) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Show driving score").font(.body)
-                                Text("A 0–100 score summarising each drive. Starts at 100 and deducts points for hard events (−4 each), sustained g-force (up to −30), and peak jerk (up to −8). Higher is smoother.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        .tint(.green)
-                    }
-                }
-
-                // MARK: Reset
-                CardSection("Reset") {
-                    Button(role: .destructive) {
-                        motion.hardThresholdG        = 0.30
-                        motion.surfaceThresholdG     = 0.40
-                        motion.autoSmoothWindowSeconds = 0.50
-                        motion.autoSmooth            = true
-                        motion.suppressVerticalEvents = true
-                        autoPause            = true
-                        backgroundRecording  = false
-                    } label: {
+                if motion.autoSmooth {
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack {
+                            Text("Smooth window")
                             Spacer()
-                            Text("Restore Defaults")
-                                .font(.body)
-                            Spacer()
+                            Text(String(format: "%.2f s", motion.autoSmoothWindowSeconds))
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(.secondary)
                         }
+                        Slider(value: $motion.autoSmoothWindowSeconds, in: 0.10...1.0, step: 0.05)
+                            .tint(.accentColor)
+                        HStack {
+                            Text("0.10 s · sensitive").font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Text("1.0 s · smooth").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Toggle("Auto-pause when stopped", isOn: $autoPause).tint(.green)
+
+                Toggle(isOn: $backgroundRecording) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Background recording")
+                        Text("Keep logging with the screen off (needs Always location access).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+
+                Toggle(isOn: $storeRawData) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Store raw sensor data")
+                        Text("Saves 10 Hz pre-smoothing samples (~200 KB per 20-min drive) so stats can be recomputed when thresholds or smoothing change.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+            }
+
+            // MARK: Detection Thresholds
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hard event")
+                            Text("Acceleration, braking, or cornering above this value is counted as a hard event.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(String(format: "%.2f g", motion.hardThresholdG))
+                            .font(.system(.headline, design: .monospaced))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Slider(value: $motion.hardThresholdG, in: 0.15...0.60, step: 0.05)
+                        .tint(Color.accentColor)
+                    HStack {
+                        Text("0.15 g — lenient").font(.caption2).foregroundStyle(.tertiary)
+                        Spacer()
+                        Text("0.60 g — strict").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Road surface")
+                            Text("Vertical spikes above this value are counted as bumps or potholes.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Text(String(format: "%.2f g", motion.surfaceThresholdG))
+                            .font(.system(.headline, design: .monospaced))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Slider(value: $motion.surfaceThresholdG, in: 0.20...0.80, step: 0.05)
+                        .tint(Color.accentColor)
+                    HStack {
+                        Text("0.20 g — lenient").font(.caption2).foregroundStyle(.tertiary)
+                        Spacer()
+                        Text("0.80 g — strict").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Detection Thresholds")
+            } footer: {
+                if needsRecompute {
+                    Label("Recomputing session history…", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+
+            // MARK: Sensors Display
+            Section("Sensors Display") {
+                Toggle(isOn: $feltDirection) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Felt direction")
+                        Text("Gravity level shows the force you feel rather than the car's motion. Braking feels like a forward push, so the dot moves forward.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+            }
+
+            // MARK: Smoothness Score
+            Section("Smoothness Score") {
+                Toggle(isOn: $showDrivingScore) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show smoothness score")
+                        Text("A 0–100 score for each drive. Deducts for hard events per minute of moving time (up to −20/min), sustained g-force (up to −30), and peak jerk (up to −8).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+            }
+
+            // MARK: Danger Zone
+            Section("Danger Zone") {
+                Button {
+                    motion.hardThresholdG          = 0.30
+                    motion.surfaceThresholdG       = 0.40
+                    motion.autoSmoothWindowSeconds = 0.50
+                    motion.autoSmooth              = true
+                    motion.suppressVerticalEvents  = true
+                    autoPause           = true
+                    backgroundRecording = false
+                } label: {
+                    HStack {
+                        Text("Restore Defaults")
+                        Spacer()
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                }
+                .foregroundStyle(Color(.label))
+
+                Button(role: .destructive) {
+                    showEraseConfirmation = true
+                } label: {
+                    HStack {
+                        Text("Erase All Drives")
+                        Spacer()
+                        Image(systemName: "trash")
                     }
                 }
             }
-            .padding(16)
-            .padding(.bottom, 80)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .listStyle(.insetGrouped)
         .navigationTitle("Settings")
+        .onChange(of: motion.hardThresholdG)          { needsRecompute = true }
+        .onChange(of: motion.surfaceThresholdG)       { needsRecompute = true }
+        .onChange(of: motion.autoSmoothWindowSeconds) { needsRecompute = true }
+        .onChange(of: motion.autoSmooth)              { needsRecompute = true }
+        .onChange(of: motion.suppressVerticalEvents)  { needsRecompute = true }
+        .task(id: needsRecompute) {
+            guard needsRecompute else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            recomputeAllSessions()
+            needsRecompute = false
+        }
+        .alert("Erase All Drives?", isPresented: $showEraseConfirmation) {
+            Button("Erase All", role: .destructive, action: eraseAllDrives)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes all recorded sessions. This cannot be undone.")
+        }
+    }
+
+    private func recomputeAllSessions() {
+        let descriptor = FetchDescriptor<DriveSession>()
+        guard let sessions = try? modelContext.fetch(descriptor) else { return }
+        for session in sessions {
+            session.recompute(
+                hardThreshold: motion.hardThresholdG,
+                surfaceThreshold: motion.surfaceThresholdG,
+                autoSmooth: motion.autoSmooth,
+                smoothWindowSeconds: motion.autoSmoothWindowSeconds,
+                suppressVertical: motion.suppressVerticalEvents
+            )
+        }
+        try? modelContext.save()
+    }
+
+    private func eraseAllDrives() {
+        let descriptor = FetchDescriptor<DriveSession>()
+        guard let sessions = try? modelContext.fetch(descriptor) else { return }
+        sessions.forEach { modelContext.delete($0) }
+        try? modelContext.save()
     }
 }

@@ -64,6 +64,12 @@ class MotionManager: ObservableObject {
     private(set) var ggSamples: [GGPoint] = []
     private var ggDownsampleTick = 0
 
+    /// Raw pre-smoothing 10 Hz samples for post-hoc recomputation
+    private(set) var rawSessionFwd: [Float] = []
+    private(set) var rawSessionLat: [Float] = []
+    private(set) var rawSessionVert: [Float] = []
+    private var shouldStoreRaw = true
+
     // Reverse-drive detection: fires once per session if a ~180° course flip is seen within 45 s
     private var initialSessionCourse: Double? = nil
     private var initialSessionCourseTime: Date? = nil
@@ -90,7 +96,7 @@ class MotionManager: ObservableObject {
     private var motionTick = 0
     private let graphDownsample = 5
     private var displayTick = 0
-    private let displayDownsample = 25
+    private let displayDownsample = 5
     private let graphBufferSize = 300
     private var graphSampleID = 0
     private var recordingStart: Date?
@@ -137,6 +143,10 @@ class MotionManager: ObservableObject {
         peakEvents = []
         ggSamples = []
         ggDownsampleTick = 0
+        shouldStoreRaw = UserDefaults.standard.object(forKey: "ds.storeRawData") as? Bool ?? true
+        rawSessionFwd = []
+        rawSessionLat = []
+        rawSessionVert = []
         initialSessionCourse = nil
         initialSessionCourseTime = nil
         hasAppliedReverseFlip = false
@@ -348,6 +358,11 @@ class MotionManager: ObservableObject {
             if recentSamples.count > graphBufferSize { recentSamples.removeFirst() }
             if isSessionActive {
                 sessionStats = liveStats
+                if shouldStoreRaw {
+                    rawSessionFwd.append(Float(rawVec.x))
+                    rawSessionLat.append(Float(rawVec.y))
+                    rawSessionVert.append(Float(rawVec.z))
+                }
                 ggDownsampleTick += 1
                 if ggDownsampleTick % 5 == 0 {
                     ggSamples.append(GGPoint(lat: sv.y, fwd: sv.x))

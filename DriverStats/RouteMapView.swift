@@ -23,6 +23,7 @@ final class PeakAnnotation: NSObject, MKAnnotation {
 struct RouteMapView: UIViewRepresentable {
     let track: [RoutePoint]
     var peakEvents: [PeakEvent] = []
+    var thumbnailMode: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -43,26 +44,36 @@ struct RouteMapView: UIViewRepresentable {
         let coordinates = track.map(\.coordinate)
         let polyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
         context.coordinator.speedsAtPoints = track.map(\.speedMps)
+        context.coordinator.thumbnailMode = thumbnailMode
         map.addOverlay(polyline, level: .aboveRoads)
 
         for event in peakEvents {
             map.addAnnotation(PeakAnnotation(event))
         }
 
-        map.setVisibleMapRect(
-            polyline.boundingMapRect,
-            edgePadding: UIEdgeInsets(top: 60, left: 40, bottom: 40, right: 40),
-            animated: false
-        )
+        let padding: UIEdgeInsets = thumbnailMode
+            ? UIEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+            : UIEdgeInsets(top: 60, left: 40, bottom: 40, right: 40)
+        map.setVisibleMapRect(polyline.boundingMapRect, edgePadding: padding, animated: false)
     }
 
     class Coordinator: NSObject, MKMapViewDelegate {
         var speedsAtPoints: [Double] = []
+        var thumbnailMode: Bool = false
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let polyline = overlay as? MKPolyline else {
                 return MKOverlayRenderer(overlay: overlay)
             }
+
+            if thumbnailMode {
+                let renderer = MKPolylineRenderer(polyline: polyline)
+                renderer.strokeColor = UIColor.systemBlue
+                renderer.lineWidth = 2
+                renderer.lineCap = .round
+                return renderer
+            }
+
             let renderer = MKGradientPolylineRenderer(polyline: polyline)
             renderer.lineWidth = 5
             renderer.lineCap = .round

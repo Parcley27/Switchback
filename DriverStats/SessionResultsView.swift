@@ -18,6 +18,9 @@ struct SessionResult: Identifiable {
     let track: [RoutePoint]
     let peakEvents: [PeakEvent]
     var ggSamples: [GGPoint] = []
+    var rawFwd: [Float] = []
+    var rawLat: [Float] = []
+    var rawVert: [Float] = []
 }
 
 // MARK: - Results sheet (shown immediately after Stop)
@@ -25,7 +28,6 @@ struct SessionResult: Identifiable {
 struct SessionResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
     let result: SessionResult
 
     @State private var didSave = false
@@ -41,11 +43,6 @@ struct SessionResultsView: View {
             .navigationTitle("Drive Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if showDrivingScore {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        ScoreRing(value: scoreFrom(result.stats), label: "Smooth", size: 44)
-                    }
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -57,19 +54,12 @@ struct SessionResultsView: View {
             }
         }
     }
-
-    private func scoreFrom(_ s: SessionStats) -> Int {
-        let hard = Double(s.hardAccelCount + s.hardBrakingCount + s.hardCorneringCount)
-        let v = 100 - 4 * hard - 30 * min(max(s.rmsNet, 0), 1) - 8 * min(max(s.peakNetJerk / 10, 0), 1)
-        return Int(max(0, min(100, v)))
-    }
 }
 
 // MARK: - Saved session detail (opened from History)
 
 struct DriveSessionView: View {
     let session: DriveSession
-    @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
     private var stats: SessionStats { SessionStats(restoringFrom: session) }
 
     var body: some View {
@@ -77,17 +67,10 @@ struct DriveSessionView: View {
             track: session.routePoints,
             peakEvents: session.peakEventsRestored,
             stats: stats,
-            ggSamples: []
+            ggSamples: session.ggPointsStored
         )
         .navigationTitle("Drive Summary")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if showDrivingScore {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    ScoreRing(value: Int(session.smoothnessScore), label: "Smooth", size: 42)
-                }
-            }
-        }
     }
 }
 
@@ -99,9 +82,29 @@ private struct DriveSessionContent: View {
     let stats: SessionStats
     let ggSamples: [GGPoint]
 
+    @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
+    @State private var showingFullscreenMap = false
+
     private let G = 9.80665
 
     private var gmax: Double { max(stats.peakNetAccel * 1.3, 0.5) }
+
+    private var smoothnessScore: Int {
+        let movingMin = max(1.0, stats.movingTimeSeconds / 60)
+        let hard = Double(stats.hardAccelCount + stats.hardBrakingCount + stats.hardCorneringCount)
+        let hardPerMin = hard / movingMin
+        let v = 100 - 20 * hardPerMin - 30 * min(max(stats.rmsNet, 0), 1) - 8 * min(max(stats.peakNetJerk / 10, 0), 1)
+        return Int(max(0, min(100, v)))
+    }
+
+    private var scoreLabel: String {
+        switch smoothnessScore {
+        case 85...: return "Excellent"
+        case 70...: return "Good"
+        case 50...: return "Fair"
+        default:    return "Rough"
+        }
+    }
 
     // Full scatter when available; fall back to 4 axis-peak markers for stored sessions
     private var ggPoints: [GGPoint] {
@@ -116,55 +119,88 @@ private struct DriveSessionContent: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 20) {
+        List {
 
-                // Route map + speed legend + sparklines (route group)
-                if track.count >= 2 {
+            // Route map + speed legend
+            if track.count >= 2 {
+                Section {
                     VStack(spacing: 0) {
                         RouteMapView(track: track, peakEvents: peakEvents)
-                            .frame(height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .frame(height: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(alignment: .topTrailing) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(7)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+                                    .padding(8)
+                            }
+                            .onTapGesture { showingFullscreenMap = true }
                         speedLegend.padding(.top, 10)
                     }
                 }
-
-                // Two dials: top speed + peak net g
-                HStack(spacing: 10) {
-                    CardSection(innerPadding: 6) {
-                        HStack { Spacer()
-                            Dial(value: stats.maxSpeedMps * 3.6, max: 200,
-                                 unit: "km/h", label: "top speed",
-                                 size: 126, zone: .accentColor)
-                        Spacer() }
-                    }
-                    CardSection(innerPadding: 6) {
-                        HStack { Spacer()
-                            Dial(value: stats.peakNetAccel, max: 1,
-                                 unit: "g", label: "peak net",
-                                 size: 126, zone: .orange, decimals: 2)
-                        Spacer() }
+                .sheet(isPresented: $showingFullscreenMap) {
+                    NavigationStack {
+                        RouteMapView(track: track, peakEvents: peakEvents)
+                            .ignoresSafeArea(edges: .bottom)
+                            .navigationTitle("Route")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .navigationBarTrailing) {
+                                    Button("Done") { showingFullscreenMap = false }
+                                }
+                            }
                     }
                 }
+            }
 
-                if !track.isEmpty {
-                    let speeds = track.map { $0.speedMps * 3.6 }
-                    CardSection("Speed over time",
-                                note: String(format: "max %.0f km/h", speeds.max() ?? 0),
-                                innerPadding: 12) {
+            // Two dials: top speed + peak net g
+            Section {
+                HStack(spacing: 16) {
+                    Spacer()
+                    Dial(value: stats.maxSpeedMps * 3.6, max: 200,
+                         unit: "km/h", label: "top speed",
+                         size: 130, zone: .accentColor)
+                    Spacer()
+                    Dial(value: stats.peakNetAccel, max: 1,
+                         unit: "g", label: "peak net",
+                         size: 130, zone: .orange, decimals: 2)
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
+            // Speed + elevation charts
+            if !track.isEmpty {
+                let speeds = track.map { $0.speedMps * 3.6 }
+                Section {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("Speed over time").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(String(format: "max %.0f km/h", speeds.max() ?? 0))
+                                .font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
+                        }
                         Sparkline(data: speeds, color: .accentColor, showFill: true)
                     }
                     let alts = track.map { $0.altitudeM }
                     if alts.contains(where: { $0 != 0 }) {
-                        CardSection("Elevation",
-                                    note: String(format: "+%.0f / −%.0f m", elevGain(alts), elevLoss(alts)),
-                                    innerPadding: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text("Elevation").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(String(format: "+%.0f / −%.0f m", elevGain(alts), elevLoss(alts)))
+                                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
+                            }
                             Sparkline(data: alts, color: .green, showFill: true)
                         }
                     }
                 }
+            }
 
-                // Overview 3×2 StatCells
+            // Overview stat cells
+            Section {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                     StatCell(label: "Duration",
                              value: formatDuration(stats.durationSeconds),
@@ -172,9 +208,10 @@ private struct DriveSessionContent: View {
                     StatCell(label: "Distance",
                              value: String(format: "%.1f", stats.totalDistanceM / 1000),
                              unit: "km")
-                    StatCell(label: "Avg moving",
-                             value: String(format: "%.0f", stats.avgMovingSpeedMps * 3.6),
-                             unit: "km/h")
+                    StatCell(label: "Avg speed",
+                             value: String(format: "%.0f", stats.avgSpeedMps * 3.6),
+                             unit: "km/h",
+                             sub: "moving \(Int(stats.avgMovingSpeedMps * 3.6))")
                     StatCell(label: "Stops",
                              value: "\(stats.stopCount)",
                              sub: "\(formatDuration(stats.stoppingTimeSeconds)) idle")
@@ -184,84 +221,104 @@ private struct DriveSessionContent: View {
                              accent: true)
                     StatCell(label: "Surface", value: "\(stats.surfaceEventCount)", sub: "bumps")
                 }
-
-                // g-g Envelope
-                if !ggPoints.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        SectionHeader("g-g Envelope", note: "peak markers").padding(.bottom, 7)
-                        CardSection(innerPadding: 10) {
-                            HStack { Spacer()
-                                GGDiagram(points: ggPoints, gmax: gmax, size: 200, showEnvelope: true)
-                            Spacer() }
-                        }
-                    }
-                }
-
-                // Longitudinal detail
-                CardSection("Longitudinal", note: "m/s² · g") {
-                    VStack(spacing: 0) {
-                        StatRow(label: "Peak acceleration",
-                                value: fg(stats.peakForward, signed: true),
-                                si: fm(stats.peakForward, signed: true))
-                        StatRow(label: "Peak braking",
-                                value: fg(stats.peakBraking, signed: true),
-                                si: fm(stats.peakBraking, signed: true))
-                        StatRow(label: "Average |a|",
-                                value: fg(stats.avgLongitudinalAbs),
-                                si: fm(stats.avgLongitudinalAbs))
-                        StatRow(label: "RMS",
-                                value: fg(stats.rmsForward),
-                                si: fm(stats.rmsForward))
-                        StatRow(label: "Hard accel / brake",
-                                value: "\(stats.hardAccelCount) / \(stats.hardBrakingCount)")
-                        StatRow(label: "Peak jerk fwd / brake",
-                                value: String(format: "%.1f / %.1f g/s",
-                                              stats.peakJerkForward, abs(stats.peakJerkBraking)),
-                                isLast: true)
-                    }
-                }
-
-                // Lateral detail
-                CardSection("Lateral", note: "m/s² · g") {
-                    VStack(spacing: 0) {
-                        StatRow(label: "Peak right",
-                                value: fg(stats.peakRight, signed: true),
-                                si: fm(stats.peakRight, signed: true))
-                        StatRow(label: "Peak left",
-                                value: fg(stats.peakLeft, signed: true),
-                                si: fm(stats.peakLeft, signed: true))
-                        StatRow(label: "Average |a|",
-                                value: fg(stats.avgLateralAbs),
-                                si: fm(stats.avgLateralAbs))
-                        StatRow(label: "RMS",
-                                value: fg(stats.rmsLateral),
-                                si: fm(stats.rmsLateral))
-                        StatRow(label: "Hard cornering",
-                                value: "\(stats.hardCorneringCount)", isLast: true)
-                    }
-                }
-
-                // Vertical & Net detail
-                CardSection("Vertical & Net", note: "m/s² · g") {
-                    VStack(spacing: 0) {
-                        StatRow(label: "Surface events", value: "\(stats.surfaceEventCount)")
-                        StatRow(label: "Peak up / down",
-                                value: String(format: "%+.2f / %.2f g",
-                                              stats.peakUp, stats.peakDown))
-                        StatRow(label: "Net peak acceleration",
-                                value: fg(stats.peakNetAccel),
-                                si: fm(stats.peakNetAccel))
-                        StatRow(label: "Net peak jerk",
-                                value: String(format: "%.1f g/s", stats.peakNetJerk),
-                                si: String(format: "%.1f", stats.peakNetJerk * G),
-                                isLast: true)
-                    }
-                }
-
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
             }
-            .padding(16)
+
+            // Smoothness score
+            if showDrivingScore {
+                Section("Smoothness Score") {
+                    HStack(spacing: 16) {
+                        ScoreRing(value: smoothnessScore, size: 64)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(scoreLabel).font(.title3).fontWeight(.semibold)
+                            Text("Hard events / min, sustained g-force, peak jerk.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            // g-g Envelope
+            if !ggPoints.isEmpty {
+                Section {
+                    HStack { Spacer()
+                        GGDiagram(points: ggPoints, gmax: gmax, size: 200, showEnvelope: true)
+                    Spacer() }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } header: {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("g-g Envelope").textCase(nil)
+                        Spacer()
+                        Text("peak markers").font(.caption2.monospaced()).foregroundStyle(.tertiary).textCase(nil)
+                    }
+                }
+            }
+
+            // Longitudinal
+            Section {
+                statRow("Peak acceleration",   fg(stats.peakForward, signed: true),  fm(stats.peakForward, signed: true))
+                statRow("Peak braking",        fg(stats.peakBraking, signed: true),  fm(stats.peakBraking, signed: true))
+                statRow("Average |a|",         fg(stats.avgLongitudinalAbs),         fm(stats.avgLongitudinalAbs))
+                statRow("RMS",                 fg(stats.rmsForward),                 fm(stats.rmsForward))
+                LabeledContent("Hard accel / brake",       value: "\(stats.hardAccelCount) / \(stats.hardBrakingCount)")
+                LabeledContent("Avg jerk |longitudinal|",  value: String(format: "%.2f g/s", stats.avgJerkLongitudinalAbs))
+                LabeledContent("Peak jerk fwd / brake",    value: String(format: "%.1f / %.1f g/s", stats.peakJerkForward, abs(stats.peakJerkBraking)))
+            } header: {
+                sectionHeader("Longitudinal", note: "m/s² · g")
+            }
+
+            // Lateral
+            Section {
+                statRow("Peak right",      fg(stats.peakRight, signed: true),  fm(stats.peakRight, signed: true))
+                statRow("Peak left",       fg(stats.peakLeft, signed: true),   fm(stats.peakLeft, signed: true))
+                statRow("Average |a|",     fg(stats.avgLateralAbs),            fm(stats.avgLateralAbs))
+                statRow("RMS",             fg(stats.rmsLateral),               fm(stats.rmsLateral))
+                LabeledContent("Hard cornering",      value: "\(stats.hardCorneringCount)")
+                LabeledContent("Avg jerk |lateral|",  value: String(format: "%.2f g/s", stats.avgJerkLateralAbs))
+                LabeledContent("Peak jerk R / L",     value: String(format: "%.1f / %.1f g/s", stats.peakJerkRight, abs(stats.peakJerkLeft)))
+            } header: {
+                sectionHeader("Lateral", note: "m/s² · g")
+            }
+
+            // Vertical & Net
+            Section {
+                LabeledContent("Surface events", value: "\(stats.surfaceEventCount)")
+                LabeledContent("Peak up / down",  value: String(format: "%+.2f / %.2f g", stats.peakUp, stats.peakDown))
+                statRow("Average |vertical|",    fg(stats.avgVerticalAbs),   fm(stats.avgVerticalAbs))
+                statRow("RMS vertical",          fg(stats.rmsVertical),      fm(stats.rmsVertical))
+                statRow("Net peak acceleration", fg(stats.peakNetAccel),     fm(stats.peakNetAccel))
+                statRow("Net avg acceleration",  fg(stats.avgNetAccel),      fm(stats.avgNetAccel))
+                statRow("Net RMS",               fg(stats.rmsNet),           fm(stats.rmsNet))
+                LabeledContent("Net peak jerk",  value: String(format: "%.1f g/s  (%.1f m/s³)", stats.peakNetJerk, stats.peakNetJerk * G))
+            } header: {
+                sectionHeader("Vertical & Net", note: "m/s² · g")
+            }
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .listStyle(.insetGrouped)
+    }
+
+    @ViewBuilder
+    private func statRow(_ label: String, _ value: String, _ si: String) -> some View {
+        LabeledContent(label) {
+            HStack(spacing: 10) {
+                Text(si).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
+                Text(value).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String, note: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).textCase(nil)
+            Spacer()
+            Text(note).font(.caption2.monospaced()).foregroundStyle(.tertiary).textCase(nil)
+        }
     }
 
     // MARK: - Helpers
@@ -272,9 +329,7 @@ private struct DriveSessionContent: View {
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(.tertiary)
             LinearGradient(
-                colors: stride(from: 0.0, through: 1.0, by: 0.05).map { t in
-                    Color(hue: t * (120.0 / 360.0), saturation: 1, brightness: 0.9)
-                },
+                colors: [.red, .orange, .yellow, .green],
                 startPoint: .leading, endPoint: .trailing
             )
             .frame(height: 6).clipShape(Capsule())

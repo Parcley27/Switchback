@@ -5,7 +5,6 @@
 //  Created by Pierce Oxley on 7/6/26.
 //
 
-import Combine
 import CoreLocation
 import SwiftData
 import SwiftUI
@@ -17,29 +16,33 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            NavigationStack {
-                if isTracking {
-                    TrackingView(motion: motion, location: location, isTracking: $isTracking)
-                } else {
-                    ReadinessView(motion: motion, location: location, isTracking: $isTracking)
+            Tab("Record", systemImage: "gauge.with.dots.needle.67percent") {
+                NavigationStack {
+                    if isTracking {
+                        TrackingView(motion: motion, location: location, isTracking: $isTracking)
+                    } else {
+                        ReadinessView(motion: motion, location: location, isTracking: $isTracking)
+                    }
                 }
             }
-            .tabItem { Label("Record", systemImage: "gauge.with.dots.needle.67percent") }
 
-            NavigationStack {
-                SensorsView(motion: motion)
+            Tab("Live", systemImage: "waveform.path") {
+                NavigationStack {
+                    SensorsView(motion: motion)
+                }
             }
-            .tabItem { Label("Live", systemImage: "waveform.path") }
 
-            NavigationStack {
-                HistoryView()
+            Tab("History", systemImage: "clock.arrow.circlepath") {
+                NavigationStack {
+                    HistoryView()
+                }
             }
-            .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
 
-            NavigationStack {
-                SettingsView(motion: motion)
+            Tab("Settings", systemImage: "gearshape.fill") {
+                NavigationStack {
+                    SettingsView(motion: motion)
+                }
             }
-            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .tint(.accentColor)
         .onAppear {
