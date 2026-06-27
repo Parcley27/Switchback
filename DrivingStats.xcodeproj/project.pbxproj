@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		BEEA5D922FEF767A00EDC9BB /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = BEEA5D912FEF767A00EDC9BB /* .gitignore */; };
+		BEEA5D932FEF767A00EDC9BB /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = BEEA5D912FEF767A00EDC9BB /* .gitignore */; };
+		BEEA5D942FEF767A00EDC9BB /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = BEEA5D912FEF767A00EDC9BB /* .gitignore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		6E6F9BFE2FD68A7200A94BEE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -28,6 +34,7 @@
 		6E6F9BFD2FD68A7200A94BEE /* DrivingStatsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DrivingStatsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E6F9C072FD68A7200A94BEE /* DrivingStatsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DrivingStatsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E6F9C202FD6992500A94BEE /* DrivingStats-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "DrivingStats-Info.plist"; sourceTree = "<group>"; };
+		BEEA5D912FEF767A00EDC9BB /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -81,6 +88,7 @@
 				6E6F9C002FD68A7200A94BEE /* DriverStatsTests */,
 				6E6F9C0A2FD68A7200A94BEE /* DriverStatsUITests */,
 				6E6F9BEF2FD68A7100A94BEE /* Products */,
+				BEEA5D912FEF767A00EDC9BB /* .gitignore */,
 			);
 			sourceTree = "<group>";
 		};
@@ -214,6 +222,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BEEA5D922FEF767A00EDC9BB /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -221,6 +230,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BEEA5D932FEF767A00EDC9BB /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -228,6 +238,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BEEA5D942FEF767A00EDC9BB /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
