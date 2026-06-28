@@ -274,6 +274,7 @@ struct HistoryView: View {
 private struct SessionCardView: View {
     let session: DriveSession
     @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
+    @AppStorage("ds.geoLabels") private var geoLabels = true
 
     private var thumbnailTrack: [RoutePoint] {
         let pts = session.routePoints
@@ -292,7 +293,8 @@ private struct SessionCardView: View {
     }
 
     private var primaryLabel: String {
-        session.routeLabel ?? session.startDate.formatted(date: .abbreviated, time: .shortened)
+        if geoLabels, let label = session.routeLabel { return label }
+        return session.startDate.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var timeRange: String {
@@ -321,7 +323,7 @@ private struct SessionCardView: View {
                         Text(primaryLabel)
                             .font(.system(size: 14.5, weight: .semibold))
                             .lineLimit(1)
-                        if session.routeLabel != nil {
+                        if geoLabels && session.routeLabel != nil {
                             Text(session.startDate.formatted(date: .abbreviated, time: .omitted))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(.secondary)

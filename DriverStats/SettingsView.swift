@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage("ds.storeRawData") private var storeRawData: Bool = true
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
+    @AppStorage("ds.geoLabels") private var geoLabels: Bool = true
 
     @State private var needsRecompute = false
     @State private var showEraseConfirmation = false
@@ -174,6 +175,15 @@ struct SettingsView: View {
 
             // MARK: History
             Section("History") {
+                Toggle(isOn: $geoLabels) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show location names")
+                        Text("Labels drives with neighborhood names (e.g. Brookswood → Creekside). Turn off to show date and time instead.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
