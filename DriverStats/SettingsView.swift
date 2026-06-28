@@ -19,6 +19,8 @@ struct SettingsView: View {
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
     @AppStorage("ds.geoLabels") private var geoLabels: Bool = true
+    
+    @Environment(\.openURL) var openURL
 
     @State private var needsRecompute = false
     @State private var showEraseConfirmation = false
@@ -214,7 +216,49 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
-
+            
+            Section("App Information") {
+                
+                Button() {
+                    openURL(URL(string: "https://pierceoxley.ca/")!)
+                    
+                } label: {
+                    HStack {
+                        Text("Developer Website")
+                        Spacer()
+                        ZStack {
+                            Image(systemName: "person.circle")
+                            
+                            Text("📅")
+                                .opacity(0)
+                            
+                        }
+                        
+                    }
+                }
+                Button() {
+                    openURL(URL(string: "https://github.com/Parcley27/Timely")!)
+                    
+                } label: {
+                    HStack {
+                        Text("Switchback Github")
+                        Spacer()
+                        ZStack {
+                            Image(systemName: "arrow.up.forward.app")
+                            
+                            Text("📅")
+                                .opacity(0)
+                            
+                        }
+                        
+                    }
+                }
+                
+                Text("Version")
+                    .badge("Beta v0.1 - Build 1 (29)")
+                
+            }
+            
             // MARK: Danger Zone
             Section("Danger Zone") {
                 Button {

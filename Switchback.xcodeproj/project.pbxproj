@@ -33,9 +33,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		6E6F9BEE2FD68A7100A94BEE /* DrivingStats.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DrivingStats.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6E6F9BFD2FD68A7200A94BEE /* DrivingStatsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DrivingStatsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		6E6F9C072FD68A7200A94BEE /* DrivingStatsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DrivingStatsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E6F9BEE2FD68A7100A94BEE /* Switchback.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Switchback.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E6F9BFD2FD68A7200A94BEE /* SwitchbackTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwitchbackTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E6F9C072FD68A7200A94BEE /* SwitchbackUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwitchbackUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E6F9C202FD6992500A94BEE /* DrivingStats-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "DrivingStats-Info.plist"; sourceTree = "<group>"; };
 		BE6B36732FF09314000D64A1 /* Switchback Icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "Switchback Icon.icon"; sourceTree = "<group>"; };
 		BEEA5D912FEF767A00EDC9BB /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
@@ -100,9 +100,9 @@
 		6E6F9BEF2FD68A7100A94BEE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				6E6F9BEE2FD68A7100A94BEE /* DrivingStats.app */,
-				6E6F9BFD2FD68A7200A94BEE /* DrivingStatsTests.xctest */,
-				6E6F9C072FD68A7200A94BEE /* DrivingStatsUITests.xctest */,
+				6E6F9BEE2FD68A7100A94BEE /* Switchback.app */,
+				6E6F9BFD2FD68A7200A94BEE /* SwitchbackTests.xctest */,
+				6E6F9C072FD68A7200A94BEE /* SwitchbackUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -110,9 +110,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		6E6F9BED2FD68A7100A94BEE /* DrivingStats */ = {
+		6E6F9BED2FD68A7100A94BEE /* Switchback */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6E6F9C112FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStats" */;
+			buildConfigurationList = 6E6F9C112FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "Switchback" */;
 			buildPhases = (
 				6E6F9BEA2FD68A7100A94BEE /* Sources */,
 				6E6F9BEB2FD68A7100A94BEE /* Frameworks */,
@@ -125,16 +125,16 @@
 			fileSystemSynchronizedGroups = (
 				6E6F9BF02FD68A7100A94BEE /* DriverStats */,
 			);
-			name = DrivingStats;
+			name = Switchback;
 			packageProductDependencies = (
 			);
 			productName = DriverStats;
-			productReference = 6E6F9BEE2FD68A7100A94BEE /* DrivingStats.app */;
+			productReference = 6E6F9BEE2FD68A7100A94BEE /* Switchback.app */;
 			productType = "com.apple.product-type.application";
 		};
-		6E6F9BFC2FD68A7200A94BEE /* DrivingStatsTests */ = {
+		6E6F9BFC2FD68A7200A94BEE /* SwitchbackTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6E6F9C142FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStatsTests" */;
+			buildConfigurationList = 6E6F9C142FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "SwitchbackTests" */;
 			buildPhases = (
 				6E6F9BF92FD68A7200A94BEE /* Sources */,
 				6E6F9BFA2FD68A7200A94BEE /* Frameworks */,
@@ -148,16 +148,16 @@
 			fileSystemSynchronizedGroups = (
 				6E6F9C002FD68A7200A94BEE /* DriverStatsTests */,
 			);
-			name = DrivingStatsTests;
+			name = SwitchbackTests;
 			packageProductDependencies = (
 			);
 			productName = DriverStatsTests;
-			productReference = 6E6F9BFD2FD68A7200A94BEE /* DrivingStatsTests.xctest */;
+			productReference = 6E6F9BFD2FD68A7200A94BEE /* SwitchbackTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		6E6F9C062FD68A7200A94BEE /* DrivingStatsUITests */ = {
+		6E6F9C062FD68A7200A94BEE /* SwitchbackUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6E6F9C172FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStatsUITests" */;
+			buildConfigurationList = 6E6F9C172FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "SwitchbackUITests" */;
 			buildPhases = (
 				6E6F9C032FD68A7200A94BEE /* Sources */,
 				6E6F9C042FD68A7200A94BEE /* Frameworks */,
@@ -171,11 +171,11 @@
 			fileSystemSynchronizedGroups = (
 				6E6F9C0A2FD68A7200A94BEE /* DriverStatsUITests */,
 			);
-			name = DrivingStatsUITests;
+			name = SwitchbackUITests;
 			packageProductDependencies = (
 			);
 			productName = DriverStatsUITests;
-			productReference = 6E6F9C072FD68A7200A94BEE /* DrivingStatsUITests.xctest */;
+			productReference = 6E6F9C072FD68A7200A94BEE /* SwitchbackUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -215,9 +215,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				6E6F9BED2FD68A7100A94BEE /* DrivingStats */,
-				6E6F9BFC2FD68A7200A94BEE /* DrivingStatsTests */,
-				6E6F9C062FD68A7200A94BEE /* DrivingStatsUITests */,
+				6E6F9BED2FD68A7100A94BEE /* Switchback */,
+				6E6F9BFC2FD68A7200A94BEE /* SwitchbackTests */,
+				6E6F9C062FD68A7200A94BEE /* SwitchbackUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -279,12 +279,12 @@
 /* Begin PBXTargetDependency section */
 		6E6F9BFF2FD68A7200A94BEE /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 6E6F9BED2FD68A7100A94BEE /* DrivingStats */;
+			target = 6E6F9BED2FD68A7100A94BEE /* Switchback */;
 			targetProxy = 6E6F9BFE2FD68A7200A94BEE /* PBXContainerItemProxy */;
 		};
 		6E6F9C092FD68A7200A94BEE /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 6E6F9BED2FD68A7100A94BEE /* DrivingStats */;
+			target = 6E6F9BED2FD68A7100A94BEE /* Switchback */;
 			targetProxy = 6E6F9C082FD68A7200A94BEE /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -587,7 +587,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6E6F9C112FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStats" */ = {
+		6E6F9C112FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "Switchback" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6E6F9C122FD68A7200A94BEE /* Debug */,
@@ -596,7 +596,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6E6F9C142FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStatsTests" */ = {
+		6E6F9C142FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "SwitchbackTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6E6F9C152FD68A7200A94BEE /* Debug */,
@@ -605,7 +605,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6E6F9C172FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "DrivingStatsUITests" */ = {
+		6E6F9C172FD68A7200A94BEE /* Build configuration list for PBXNativeTarget "SwitchbackUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6E6F9C182FD68A7200A94BEE /* Debug */,
