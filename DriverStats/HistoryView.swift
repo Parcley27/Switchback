@@ -9,7 +9,28 @@ import Charts
 import SwiftData
 import SwiftUI
 
-// MARK: - History List
+// MARK: - Filter types
+
+private enum TimeFilter: String, CaseIterable, Hashable {
+    case thisWeek  = "This Week"
+    case thisMonth = "This Month"
+}
+
+private enum DurationFilter: String, CaseIterable, Hashable {
+    case short  = "< 15 min"
+    case medium = "15–60 min"
+    case long   = "> 1 hr"
+
+    func matches(_ seconds: Double) -> Bool {
+        switch self {
+        case .short:  return seconds < 900
+        case .medium: return seconds >= 900 && seconds <= 3600
+        case .long:   return seconds > 3600
+        }
+    }
+}
+
+// MARK: - History List (outer shell — owns @Query, applies .searchable)
 
 struct HistoryView: View {
     @Query(sort: \DriveSession.startDate, order: .reverse) private var sessions: [DriveSession]
@@ -19,22 +40,202 @@ struct HistoryView: View {
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var showMergeConfirmation = false
 
+    // Search & filter
+    @State private var searchText: String = ""
+    @State private var activeTimeFilter: TimeFilter? = nil
+    @State private var activeDurationFilter: DurationFilter? = nil
+    @State private var useCustomRange: Bool = false
+    @State private var showDateRangePicker: Bool = false
+    @State private var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var customEndDate: Date = Date()
+
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
 
     var body: some View {
-        Group {
-            if sessions.isEmpty {
-                ScrollView {
-                    ContentUnavailableView(
-                        "No sessions yet",
-                        systemImage: "car.fill",
-                        description: Text("Start a tracking session to record your drive.")
-                    )
-                    .padding(.top, 60)
+        HistoryListContent(
+            sessions: sessions,
+            searchText: $searchText,
+            activeTimeFilter: $activeTimeFilter,
+            activeDurationFilter: $activeDurationFilter,
+            useCustomRange: $useCustomRange,
+            showDateRangePicker: $showDateRangePicker,
+            customStartDate: $customStartDate,
+            customEndDate: $customEndDate,
+            editMode: $editMode,
+            selection: $selection
+        )
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("History")
+        .searchable(text: $searchText, prompt: "Search drives…")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showingAllDrivesMap = true
+                } label: {
+                    Image(systemName: "map")
                 }
-            } else {
-                List(selection: $selection) {
-                    // Aggregate stats + smoothness trend
+                .disabled(sessions.isEmpty)
+            }
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if editMode == .active, mergeCandidate != nil {
+                    Button("Merge") {
+                        showMergeConfirmation = true
+                    }
+                }
+                Button(editMode == .active ? "Done" : "Edit") {
+                    withAnimation {
+                        if editMode == .active {
+                            editMode = .inactive
+                            selection.removeAll()
+                        } else {
+                            editMode = .active
+                        }
+                    }
+                }
+                .disabled(sessions.isEmpty)
+            }
+        }
+        .alert("Merge 2 Drives?", isPresented: $showMergeConfirmation) {
+            Button("Merge", role: .destructive, action: performMerge)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The gap between these drives will count as stopping time. Both original sessions will be replaced by a single combined session.")
+        }
+        .sheet(isPresented: $showDateRangePicker) {
+            DateRangePickerSheet(
+                startDate: $customStartDate,
+                endDate: $customEndDate,
+                isPresented: $showDateRangePicker
+            ) {
+                useCustomRange = true
+                activeTimeFilter = nil
+            }
+        }
+        .fullScreenCover(isPresented: $showingAllDrivesMap) {
+            NavigationStack {
+                AllDrivesMapView(sessions: sessions)
+                    .ignoresSafeArea(edges: .bottom)
+                    .navigationTitle("All Drives")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showingAllDrivesMap = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    // MARK: - Merge logic
+
+    private var mergeCandidate: (DriveSession, DriveSession)? {
+        guard selection.count == 2 else { return nil }
+        let picked = sessions.filter { selection.contains($0.persistentModelID) }
+        guard picked.count == 2 else { return nil }
+        let first  = picked[0].startDate <= picked[1].startDate ? picked[0] : picked[1]
+        let second = picked[0].startDate <= picked[1].startDate ? picked[1] : picked[0]
+        let gap = second.startDate.timeIntervalSince(
+            first.startDate.addingTimeInterval(first.durationSeconds))
+        guard gap >= 0, gap < mergeWindowMinutes * 60 else { return nil }
+        return (first, second)
+    }
+
+    private func performMerge() {
+        guard let (first, second) = mergeCandidate else { return }
+        let merged = DriveSession(merging: first, with: second)
+        let ud = UserDefaults.standard
+        merged.recompute(
+            hardThreshold:       (ud.object(forKey: "ds.hardThreshold")    as? Double) ?? 0.3,
+            surfaceThreshold:    (ud.object(forKey: "ds.surfaceThreshold") as? Double) ?? 0.4,
+            autoSmooth:          (ud.object(forKey: "ds.autoSmooth")       as? Bool)   ?? true,
+            smoothWindowSeconds: (ud.object(forKey: "ds.autoSmoothWindow") as? Double) ?? 0.5,
+            suppressVertical:    (ud.object(forKey: "ds.suppressVertical") as? Bool)   ?? true
+        )
+        modelContext.insert(merged)
+        modelContext.delete(first)
+        modelContext.delete(second)
+        try? modelContext.save()
+        selection.removeAll()
+        withAnimation { editMode = .inactive }
+    }
+}
+
+// MARK: - History list content (child — can read isSearching)
+
+private struct HistoryListContent: View {
+    let sessions: [DriveSession]
+    @Binding var searchText: String
+    @Binding var activeTimeFilter: TimeFilter?
+    @Binding var activeDurationFilter: DurationFilter?
+    @Binding var useCustomRange: Bool
+    @Binding var showDateRangePicker: Bool
+    @Binding var customStartDate: Date
+    @Binding var customEndDate: Date
+    @Binding var editMode: EditMode
+    @Binding var selection: Set<PersistentIdentifier>
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.isSearching) private var isSearching
+
+    private var isFiltering: Bool {
+        isSearching || !searchText.isEmpty || activeTimeFilter != nil || activeDurationFilter != nil || useCustomRange
+    }
+
+    private var filteredSessions: [DriveSession] {
+        var result = sessions
+
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter { session in
+                let label = session.routeLabel?.lowercased() ?? ""
+                let dateStr = session.startDate.formatted(date: .abbreviated, time: .shortened).lowercased()
+                return label.contains(query) || dateStr.contains(query)
+            }
+        }
+
+        if let timeFilter = activeTimeFilter {
+            let cal = Calendar.current
+            switch timeFilter {
+            case .thisWeek:
+                let cutoff = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+                result = result.filter { $0.startDate >= cutoff }
+            case .thisMonth:
+                let cutoff = cal.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+                result = result.filter { $0.startDate >= cutoff }
+            }
+        } else if useCustomRange {
+            let endOfDay = Calendar.current.date(byAdding: .day, value: 1, to: customEndDate) ?? customEndDate
+            result = result.filter { $0.startDate >= customStartDate && $0.startDate < endOfDay }
+        }
+
+        if let durationFilter = activeDurationFilter {
+            result = result.filter { durationFilter.matches($0.durationSeconds) }
+        }
+
+        return result
+    }
+
+    private func clearAllFilters() {
+        searchText = ""
+        activeTimeFilter = nil
+        activeDurationFilter = nil
+        useCustomRange = false
+    }
+
+    var body: some View {
+        if sessions.isEmpty {
+            ScrollView {
+                ContentUnavailableView(
+                    "No sessions yet",
+                    systemImage: "car.fill",
+                    description: Text("Start a tracking session to record your drive.")
+                )
+                .padding(.top, 60)
+            }
+        } else {
+            List(selection: $selection) {
+                // Aggregate stats + smoothness trend
+                if !isFiltering {
                     Section {
                         VStack(spacing: 18) {
                             NavigationLink(destination: HistoryStatsView(sessions: sessions)) {
@@ -103,10 +304,41 @@ struct HistoryView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
                     }
+                }
 
-                    // Drive cards
-                    Section {
-                        ForEach(sessions) { session in
+                // Filter chips
+                Section {
+                    FilterChipRow(
+                        activeTimeFilter: $activeTimeFilter,
+                        activeDurationFilter: $activeDurationFilter,
+                        useCustomRange: $useCustomRange,
+                        showDateRangePicker: $showDateRangePicker
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                }
+
+                // Drive cards
+                Section {
+                    if filteredSessions.isEmpty {
+                        VStack(spacing: 14) {
+                            ContentUnavailableView(
+                                "No results",
+                                systemImage: "magnifyingglass",
+                                description: Text("No drives match your search or filters.")
+                            )
+                            Button("Clear Filters") {
+                                clearAllFilters()
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .padding(.bottom, 8)
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    } else {
+                        ForEach(filteredSessions) { session in
                             NavigationLink(destination: DriveSessionView(session: session)) {
                                 SessionCardView(session: session)
                             }
@@ -115,111 +347,28 @@ struct HistoryView: View {
                             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         }
                         .onDelete { indexSet in
-                            indexSet.forEach { modelContext.delete(sessions[$0]) }
+                            indexSet.forEach { modelContext.delete(filteredSessions[$0]) }
                         }
-                    } header: {
-                        Text("Recent Drives")
+                    }
+                } header: {
+                    HStack(spacing: 5) {
+                        Text(isFiltering ? "Results" : "Recent Drives")
                             .font(.footnote).fontWeight(.medium)
                             .textCase(.uppercase)
                             .foregroundStyle(.secondary)
                             .tracking(0.3)
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .environment(\.editMode, $editMode)
-            }
-        }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("History")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showingAllDrivesMap = true
-                } label: {
-                    Image(systemName: "map")
-                }
-                .disabled(sessions.isEmpty)
-            }
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if editMode == .active, mergeCandidate != nil {
-                    Button("Merge") {
-                        showMergeConfirmation = true
-                    }
-                }
-                Button(editMode == .active ? "Done" : "Edit") {
-                    withAnimation {
-                        if editMode == .active {
-                            editMode = .inactive
-                            selection.removeAll()
-                        } else {
-                            editMode = .active
+                        if isFiltering {
+                            Text("(\(filteredSessions.count))")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
-                .disabled(sessions.isEmpty)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, $editMode)
         }
-        .alert("Merge 2 Drives?", isPresented: $showMergeConfirmation) {
-            Button("Merge", role: .destructive, action: performMerge)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The gap between these drives will count as stopping time. Both original sessions will be replaced by a single combined session.")
-        }
-        .fullScreenCover(isPresented: $showingAllDrivesMap) {
-            NavigationStack {
-                AllDrivesMapView(sessions: sessions)
-                    .ignoresSafeArea(edges: .bottom)
-                    .navigationTitle("All Drives")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showingAllDrivesMap = false }
-                        }
-                    }
-            }
-        }
-    }
-
-    // MARK: - Merge logic
-
-    /// Returns the two selected sessions (sorted earliest first) when they are merge-eligible,
-    /// i.e. the gap between the first session's end and the second session's start is within
-    /// the configured merge window.
-    private var mergeCandidate: (DriveSession, DriveSession)? {
-        guard selection.count == 2 else { return nil }
-        let picked = sessions.filter { selection.contains($0.persistentModelID) }
-        guard picked.count == 2 else { return nil }
-        let first  = picked[0].startDate <= picked[1].startDate ? picked[0] : picked[1]
-        let second = picked[0].startDate <= picked[1].startDate ? picked[1] : picked[0]
-        let gap = second.startDate.timeIntervalSince(
-            first.startDate.addingTimeInterval(first.durationSeconds))
-        guard gap >= 0, gap < mergeWindowMinutes * 60 else { return nil }
-        return (first, second)
-    }
-
-    private func performMerge() {
-        guard let (first, second) = mergeCandidate else { return }
-
-        let merged = DriveSession(merging: first, with: second)
-
-        // Use the same persisted threshold/smoothing settings as recomputeAllSessions()
-        let ud = UserDefaults.standard
-        merged.recompute(
-            hardThreshold:       (ud.object(forKey: "ds.hardThreshold")    as? Double) ?? 0.3,
-            surfaceThreshold:    (ud.object(forKey: "ds.surfaceThreshold") as? Double) ?? 0.4,
-            autoSmooth:          (ud.object(forKey: "ds.autoSmooth")       as? Bool)   ?? true,
-            smoothWindowSeconds: (ud.object(forKey: "ds.autoSmoothWindow") as? Double) ?? 0.5,
-            suppressVertical:    (ud.object(forKey: "ds.suppressVertical") as? Bool)   ?? true
-        )
-
-        modelContext.insert(merged)
-        modelContext.delete(first)
-        modelContext.delete(second)
-        try? modelContext.save()
-
-        selection.removeAll()
-        withAnimation { editMode = .inactive }
     }
 
     // MARK: - Aggregates
@@ -269,6 +418,118 @@ struct HistoryView: View {
     }
 }
 
+// MARK: - Filter chip row
+
+private struct FilterChipRow: View {
+    @Binding var activeTimeFilter: TimeFilter?
+    @Binding var activeDurationFilter: DurationFilter?
+    @Binding var useCustomRange: Bool
+    @Binding var showDateRangePicker: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TimeFilter.allCases, id: \.self) { filter in
+                    FilterChip(label: filter.rawValue, isActive: activeTimeFilter == filter) {
+                        if activeTimeFilter == filter {
+                            activeTimeFilter = nil
+                        } else {
+                            activeTimeFilter = filter
+                            useCustomRange = false
+                        }
+                    }
+                }
+
+                FilterChip(
+                    label: "Custom Range",
+                    isActive: useCustomRange,
+                    systemImage: "calendar"
+                ) {
+                    showDateRangePicker = true
+                }
+
+                Rectangle()
+                    .fill(Color(.separator))
+                    .frame(width: 1, height: 20)
+                    .padding(.horizontal, 2)
+
+                ForEach(DurationFilter.allCases, id: \.self) { filter in
+                    FilterChip(label: filter.rawValue, isActive: activeDurationFilter == filter) {
+                        activeDurationFilter = activeDurationFilter == filter ? nil : filter
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+        }
+    }
+}
+
+// MARK: - Filter chip
+
+private struct FilterChip: View {
+    let label: String
+    let isActive: Bool
+    var systemImage: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                isActive ? Color.accentColor : Color(.secondarySystemGroupedBackground),
+                in: Capsule()
+            )
+            .foregroundStyle(isActive ? Color.white : Color(.label))
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isActive)
+    }
+}
+
+// MARK: - Date range picker sheet
+
+private struct DateRangePickerSheet: View {
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    @Binding var isPresented: Bool
+    let onApply: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                DatePicker("From", selection: $startDate, displayedComponents: .date)
+                DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
+            }
+            .navigationTitle("Custom Date Range")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") {
+                        onApply()
+                        isPresented = false
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 // MARK: - Drive card row
 
 private struct SessionCardView: View {
@@ -305,7 +566,6 @@ private struct SessionCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Mini route map thumbnail
             Group {
                 if session.routePoints.count >= 2 {
                     RouteMapView(track: thumbnailTrack, peakEvents: [], thumbnailMode: true)
