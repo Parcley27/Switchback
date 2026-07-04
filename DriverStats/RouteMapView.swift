@@ -31,6 +31,7 @@ struct RouteMapView: UIViewRepresentable {
     let track: [RoutePoint]
     var peakEvents: [PeakEvent] = []
     var thumbnailMode: Bool = false
+    var showSurfaceEvents: Bool = false
     var scrubCoordinate: CLLocationCoordinate2D? = nil
     /// Called with a 0–1 fraction when the user long-presses and drags along the route,
     /// or nil when the gesture ends. Ignored in thumbnailMode.
@@ -60,7 +61,8 @@ struct RouteMapView: UIViewRepresentable {
 
     func updateUIView(_ map: MKMapView, context: Context) {
         context.coordinator.onScrubFractionChanged = onScrubFractionChanged
-        context.coordinator.setup(map: map, track: track, peakEvents: peakEvents, thumbnailMode: thumbnailMode)
+        context.coordinator.setup(map: map, track: track, peakEvents: peakEvents,
+                                  thumbnailMode: thumbnailMode, showSurfaceEvents: showSurfaceEvents)
         context.coordinator.updateScrub(map: map, coordinate: scrubCoordinate)
     }
 
@@ -69,6 +71,7 @@ struct RouteMapView: UIViewRepresentable {
         private var currentStride: Int = 1
         private var lastTrackSignature: Int = -1
         private var lastPeakEventCount: Int = -1
+        private var lastShowSurfaceEvents: Bool = false
         private(set) var thumbnailMode: Bool = false
         // parallel to the polyline currently on the map
         var speedsAtPoints: [Double] = []
@@ -76,14 +79,20 @@ struct RouteMapView: UIViewRepresentable {
         private var scrubAnnotation: ScrubAnnotation? = nil
         var onScrubFractionChanged: ((Double?) -> Void)? = nil
 
-        func setup(map: MKMapView, track: [RoutePoint], peakEvents: [PeakEvent], thumbnailMode: Bool) {
+        // Surface event circle overlays and their associated g-forces for coloring
+        private var circleColors: [ObjectIdentifier: Double] = [:]
+
+        func setup(map: MKMapView, track: [RoutePoint], peakEvents: [PeakEvent],
+                   thumbnailMode: Bool, showSurfaceEvents: Bool) {
             let sig = trackSignature(track, thumbnail: thumbnailMode)
             let trackChanged = sig != lastTrackSignature
             let eventsChanged = peakEvents.count != lastPeakEventCount
-            guard trackChanged || eventsChanged else { return }
+            let surfaceToggled = showSurfaceEvents != lastShowSurfaceEvents
+            guard trackChanged || eventsChanged || surfaceToggled else { return }
 
             lastTrackSignature = sig
             lastPeakEventCount = peakEvents.count
+            lastShowSurfaceEvents = showSurfaceEvents
             self.thumbnailMode = thumbnailMode
             self.fullTrack = track
 
@@ -91,12 +100,15 @@ struct RouteMapView: UIViewRepresentable {
             map.removeAnnotations(map.annotations)
             // scrubAnnotation was on the map; updateScrub will re-add it after setup returns
             scrubAnnotation = nil
+            circleColors.removeAll()
             guard track.count >= 2 else { return }
 
-            for event in peakEvents {
+            // Non-surface peak event markers
+            for event in peakEvents where event.type != .surface {
                 map.addAnnotation(PeakAnnotation(event))
             }
 
+            // Route polyline (added first so circles render on top)
             if thumbnailMode {
                 placePolyline(sampled: track, on: map)
             } else {
@@ -105,9 +117,22 @@ struct RouteMapView: UIViewRepresentable {
                 placePolyline(span: MKCoordinateSpan(latitudeDelta: 10, longitudeDelta: 10), on: map)
             }
 
+            // Surface event circles (grouped to 25 m cells)
+            // aboveLabels ensures circles render on top of the gradient polyline regardless of zoom
+            if showSurfaceEvents && !thumbnailMode {
+                let surfaceEvents = peakEvents.filter { $0.type == .surface }
+                for (coord, count, maxG) in clusterEvents(surfaceEvents, cellMeters: 25) {
+                    let radius = max(18.0, min(50.0, Double(count) * 6 + 14))
+                    let circle = MKCircle(center: coord, radius: radius)
+                    circleColors[ObjectIdentifier(circle)] = maxG
+                    map.addOverlay(circle, level: .aboveLabels)
+                }
+            }
+
             let padding: UIEdgeInsets = thumbnailMode
                 ? UIEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
                 : UIEdgeInsets(top: 60, left: 40, bottom: 40, right: 40)
+            // Use the first overlay (the polyline) for bounding rect
             if let overlay = map.overlays.first {
                 map.setVisibleMapRect(overlay.boundingMapRect, edgePadding: padding, animated: false)
             }
@@ -162,11 +187,22 @@ struct RouteMapView: UIViewRepresentable {
             guard !thumbnailMode, fullTrack.count >= 2 else { return }
             let newStep = computeStep(totalPoints: fullTrack.count, span: mapView.region.span)
             guard newStep != currentStride else { return }
-            mapView.removeOverlays(mapView.overlays)
+            // Only remove polylines — surface circle overlays stay in place
+            let polylines = mapView.overlays.compactMap { $0 as? MKPolyline }
+            mapView.removeOverlays(polylines)
             placePolyline(span: mapView.region.span, on: mapView)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let circle = overlay as? MKCircle {
+                let renderer = MKCircleRenderer(circle: circle)
+                let g = circleColors[ObjectIdentifier(circle)] ?? 0.4
+                let col = severityColor(g)
+                renderer.fillColor   = col.withAlphaComponent(0.55)
+                renderer.strokeColor = col.withAlphaComponent(0.95)
+                renderer.lineWidth   = 2
+                return renderer
+            }
             guard let polyline = overlay as? MKPolyline else {
                 return MKOverlayRenderer(overlay: overlay)
             }
@@ -219,6 +255,7 @@ struct RouteMapView: UIViewRepresentable {
             case .peakAccel:   view.markerTintColor = .systemBlue
             case .peakBraking: view.markerTintColor = .systemRed
             case .peakRight, .peakLeft: view.markerTintColor = .systemOrange
+            case .surface:     view.markerTintColor = .systemYellow
             }
             return view
         }
@@ -267,6 +304,43 @@ struct RouteMapView: UIViewRepresentable {
                 hasher.combine(first.coordinate.longitude)
             }
             return hasher.finalize()
+        }
+
+        // Cluster surface events into grid cells of `cellMeters` side length.
+        // Returns (centroid, count, maxGForce) per cell.
+        private func clusterEvents(_ events: [PeakEvent], cellMeters: Double)
+            -> [(CLLocationCoordinate2D, Int, Double)] {
+            let cellDeg = cellMeters / 111_000.0
+            var cells: [SIMD2<Int>: [(CLLocationCoordinate2D, Double)]] = [:]
+            for event in events {
+                let key = SIMD2<Int>(
+                    Int(floor(event.coordinate.latitude  / cellDeg)),
+                    Int(floor(event.coordinate.longitude / cellDeg))
+                )
+                let g = Double(event.formatted.components(separatedBy: " ").first ?? "0") ?? 0
+                cells[key, default: []].append((event.coordinate, g))
+            }
+            return cells.values.compactMap { items -> (CLLocationCoordinate2D, Int, Double)? in
+                guard !items.isEmpty else { return nil }
+                let lat = items.map(\.0.latitude).reduce(0,  +) / Double(items.count)
+                let lon = items.map(\.0.longitude).reduce(0, +) / Double(items.count)
+                let maxG = items.map(\.1).max() ?? 0.4
+                return (CLLocationCoordinate2D(latitude: lat, longitude: lon), items.count, maxG)
+            }
+        }
+
+        // Green (mild ~0.4 g) → yellow → orange → red (severe 0.8+ g)
+        private func severityColor(_ g: Double) -> UIColor {
+            let t = CGFloat(max(0, min(1, (g - 0.4) / 0.6)))
+            let hue: CGFloat
+            if t < 0.33 {
+                hue = 120.0/360.0 - t / 0.33 * 60.0/360.0
+            } else if t < 0.66 {
+                hue = 60.0/360.0 - (t - 0.33) / 0.33 * 30.0/360.0
+            } else {
+                hue = 30.0/360.0 - (t - 0.66) / 0.34 * 30.0/360.0
+            }
+            return UIColor(hue: max(0, hue), saturation: 1, brightness: 0.85, alpha: 1)
         }
 
         // Red → orange (⅓) → yellow (⅔) → green (max speed)

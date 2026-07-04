@@ -108,6 +108,8 @@ struct SessionResultsView: View {
 
 struct DriveSessionView: View {
     let session: DriveSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingSplitSheet = false
     private var stats: SessionStats { SessionStats(restoringFrom: session) }
 
     var body: some View {
@@ -123,6 +125,18 @@ struct DriveSessionView: View {
         )
         .navigationTitle(session.routeLabel ?? "Drive Summary")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if session.routeLatitudes.count >= 4 {
+                    Button { showingSplitSheet = true } label: {
+                        Label("Split Drive", systemImage: "scissors")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingSplitSheet) {
+            SplitSessionSheet(session: session, onSplitComplete: { dismiss() })
+        }
     }
 }
 
@@ -138,7 +152,7 @@ private struct DriveSessionContent: View {
     var rawFwd: [Float] = []
     var rawLat: [Float] = []
 
-    @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
+    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents = false
     @State private var showingFullscreenMap = false
     @State private var scrubFraction: Double? = nil
 
@@ -150,23 +164,6 @@ private struct DriveSessionContent: View {
         guard let frac = scrubFraction, track.count >= 2 else { return nil }
         let idx = min(track.count - 1, max(0, Int(frac * Double(track.count))))
         return track[idx].coordinate
-    }
-
-    private var smoothnessScore: Int {
-        let movingMin = max(1.0, stats.movingTimeSeconds / 60)
-        let hard = Double(stats.hardAccelCount + stats.hardBrakingCount + stats.hardCorneringCount)
-        let hardPerMin = hard / movingMin
-        let v = 100 - 20 * hardPerMin - 30 * min(max(stats.rmsNet, 0), 1) - 8 * min(max(stats.peakNetJerk / 10, 0), 1)
-        return Int(max(0, min(100, v)))
-    }
-
-    private var scoreLabel: String {
-        switch smoothnessScore {
-        case 85...: return "Excellent"
-        case 70...: return "Good"
-        case 50...: return "Fair"
-        default:    return "Rough"
-        }
     }
 
     // Full scatter when available; fall back to 4 axis-peak markers for stored sessions
@@ -189,6 +186,7 @@ private struct DriveSessionContent: View {
                 Section {
                     VStack(spacing: 0) {
                         RouteMapView(track: track, peakEvents: peakEvents,
+                                     showSurfaceEvents: showSurfaceEvents,
                                      scrubCoordinate: scrubCoordinate,
                                      onScrubFractionChanged: { scrubFraction = $0 })
                             .frame(height: 200)
@@ -374,21 +372,6 @@ private struct DriveSessionContent: View {
                 }
             }
 
-            // Smoothness score
-            if showDrivingScore {
-                Section("Smoothness Score") {
-                    HStack(spacing: 16) {
-                        ScoreRing(value: smoothnessScore, size: 64)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(scoreLabel).font(.title3).fontWeight(.semibold)
-                            Text("Hard events / min, sustained g-force, peak jerk.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
 
             // g-g Envelope
             if !ggPoints.isEmpty {
@@ -552,6 +535,7 @@ private struct FullscreenRouteView: View {
     var rawFwd: [Float] = []
     var rawLat: [Float] = []
 
+    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents = false
     @State private var scrubFraction: Double? = nil
 
     private var speeds: [Double] { track.map { $0.speedMps * 3.6 } }
@@ -569,6 +553,7 @@ private struct FullscreenRouteView: View {
             RouteMapView(
                 track: track,
                 peakEvents: peakEvents,
+                showSurfaceEvents: showSurfaceEvents,
                 scrubCoordinate: scrubCoordinate,
                 onScrubFractionChanged: { scrubFraction = $0 }
             )
@@ -624,6 +609,256 @@ private struct FullscreenRouteView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.bottom, 20)
+        }
+    }
+}
+
+// MARK: - Split session sheet
+
+private struct SplitSessionSheet: View {
+    let session: DriveSession
+    var onSplitComplete: (() -> Void)? = nil
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    @State private var splitFraction: Double = 0.5
+    @State private var isSplitting = false
+
+    private var routeCount: Int { session.routeLatitudes.count }
+    private var speeds: [Double] { session.routeSpeeds.map { $0 * 3.6 } }
+
+    private var splitRouteIndex: Int {
+        max(1, min(routeCount - 1, Int(splitFraction * Double(routeCount))))
+    }
+
+    private var durationA: Double { session.durationSeconds * splitFraction }
+    private var durationB: Double { session.durationSeconds * (1 - splitFraction) }
+
+    private var splitCoordinate: CLLocationCoordinate2D? {
+        guard routeCount >= 2 else { return nil }
+        let idx = min(routeCount - 1, splitRouteIndex)
+        return CLLocationCoordinate2D(
+            latitude: session.routeLatitudes[idx],
+            longitude: session.routeLongitudes[idx]
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if session.routePoints.count >= 2 {
+                    RouteMapView(
+                        track: session.routePoints,
+                        peakEvents: [],
+                        showSurfaceEvents: false,
+                        scrubCoordinate: splitCoordinate
+                    )
+                    .frame(height: 260)
+                }
+
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Drag chart or use slider to set split point")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        SplitPositionChart(data: speeds, splitFraction: $splitFraction)
+                    }
+                    .padding(.horizontal, 20)
+
+                    HStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Part A", systemImage: "1.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(formatDuration(durationA))
+                                .font(.system(.callout, design: .monospaced))
+                                .fontWeight(.semibold)
+                        }
+                        Spacer()
+                        Image(systemName: "scissors")
+                            .font(.title3)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Label("Part B", systemImage: "2.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(formatDuration(durationB))
+                                .font(.system(.callout, design: .monospaced))
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+
+                    Slider(value: $splitFraction, in: 0.02...0.98)
+                        .padding(.horizontal, 20)
+                }
+                .padding(.top, 20)
+
+                Spacer()
+            }
+            .navigationTitle("Split Drive")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isSplitting)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(role: .destructive) {
+                        performSplit()
+                    } label: {
+                        Text(isSplitting ? "Splitting…" : "Split")
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(isSplitting)
+                }
+            }
+        }
+    }
+
+    private func performSplit() {
+        guard !isSplitting else { return }
+        isSplitting = true
+
+        let splitIdx = splitRouteIndex
+
+        // Capture coordinates before the original is deleted
+        let firstLat = session.routeLatitudes.first
+        let firstLon = session.routeLongitudes.first
+        let lastLat  = session.routeLatitudes.last
+        let lastLon  = session.routeLongitudes.last
+        let splitLat = splitIdx < routeCount ? session.routeLatitudes[splitIdx] : nil
+        let splitLon = splitIdx < routeCount ? session.routeLongitudes[splitIdx] : nil
+
+        let startCoord = firstLat.flatMap { lat -> CLLocationCoordinate2D? in
+            firstLon.map { CLLocationCoordinate2D(latitude: lat, longitude: $0) }
+        }
+        let endCoord = lastLat.flatMap { lat -> CLLocationCoordinate2D? in
+            lastLon.map { CLLocationCoordinate2D(latitude: lat, longitude: $0) }
+        }
+        let midCoord = splitLat.flatMap { lat -> CLLocationCoordinate2D? in
+            splitLon.map { CLLocationCoordinate2D(latitude: lat, longitude: $0) }
+        }
+
+        let sessionA = DriveSession(splitting: session, at: splitIdx, isFirst: true)
+        let sessionB = DriveSession(splitting: session, at: splitIdx, isFirst: false)
+
+        let ud = UserDefaults.standard
+        let hardT    = ud.object(forKey: "ds.hardThreshold")    as? Double ?? 0.3
+        let surfT    = ud.object(forKey: "ds.surfaceThreshold") as? Double ?? 0.4
+        let smooth   = ud.object(forKey: "ds.autoSmooth")       as? Bool   ?? true
+        let smoothW  = ud.object(forKey: "ds.autoSmoothWindow") as? Double ?? 0.5
+        let suppV    = ud.object(forKey: "ds.suppressVertical") as? Bool   ?? true
+        sessionA.recompute(hardThreshold: hardT, surfaceThreshold: surfT,
+                           autoSmooth: smooth, smoothWindowSeconds: smoothW, suppressVertical: suppV)
+        sessionB.recompute(hardThreshold: hardT, surfaceThreshold: surfT,
+                           autoSmooth: smooth, smoothWindowSeconds: smoothW, suppressVertical: suppV)
+
+        modelContext.insert(sessionA)
+        modelContext.insert(sessionB)
+        modelContext.delete(session)
+        try? modelContext.save()
+
+        // Dismiss sheet then pop the detail view
+        dismiss()
+        onSplitComplete?()
+
+        // Geocode in background after the UI has already transitioned
+        Task { @MainActor in
+            let descriptor = FetchDescriptor<NamedLocation>()
+            let named = (try? modelContext.fetch(descriptor)) ?? []
+
+            if let coord = midCoord {
+                let name: String?
+                if let n = splitPlaceName(for: coord, in: named) { name = n }
+                else { name = await reversePlaceName(coordinate: coord) }
+                sessionA.endPlaceName   = name
+                sessionB.startPlaceName = name
+            }
+            if sessionA.startPlaceName == nil, let coord = startCoord {
+                if let n = splitPlaceName(for: coord, in: named) { sessionA.startPlaceName = n }
+                else { sessionA.startPlaceName = await reversePlaceName(coordinate: coord) }
+            }
+            if sessionB.endPlaceName == nil, let coord = endCoord {
+                if let n = splitPlaceName(for: coord, in: named) { sessionB.endPlaceName = n }
+                else { sessionB.endPlaceName = await reversePlaceName(coordinate: coord) }
+            }
+        }
+    }
+
+    private func splitPlaceName(for coordinate: CLLocationCoordinate2D,
+                                in locations: [NamedLocation]) -> String? {
+        locations.filter { $0.contains(coordinate) }.min(by: { $0.radius < $1.radius })?.name
+    }
+
+    private func reversePlaceName(coordinate: CLLocationCoordinate2D) async -> String? {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
+        return await withCheckedContinuation { continuation in
+            request.getMapItems { items, _ in
+                continuation.resume(returning: items?.first?.addressRepresentations?.cityName)
+            }
+        }
+    }
+}
+
+// MARK: - Split position chart
+
+private struct SplitPositionChart: View {
+    let data: [Double]
+    @Binding var splitFraction: Double
+    var height: CGFloat = 72
+
+    private var xMax: Int { max(1, data.count - 1) }
+    private var splitX: Int { min(xMax, max(0, Int(splitFraction * Double(xMax)))) }
+
+    private var decimated: [(index: Int, value: Double)] {
+        guard !data.isEmpty else { return [] }
+        let step = max(1, data.count / 300)
+        return Swift.stride(from: 0, to: data.count, by: step).map { (index: $0, value: data[$0]) }
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        0...max((data.max() ?? 10) * 1.1, 10)
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(decimated, id: \.index) { pt in
+                AreaMark(x: .value("i", pt.index), y: .value("v", pt.value))
+                    .foregroundStyle(Color.accentColor.opacity(0.12))
+                LineMark(x: .value("i", pt.index), y: .value("v", pt.value))
+                    .foregroundStyle(Color.accentColor)
+                    .lineStyle(StrokeStyle(lineWidth: 1.6))
+            }
+            RuleMark(x: .value("split", splitX))
+                .foregroundStyle(Color(.label).opacity(0.6))
+                .lineStyle(StrokeStyle(lineWidth: 2))
+                .annotation(position: .top, spacing: 2) {
+                    Image(systemName: "scissors")
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                }
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .chartYScale(domain: yDomain)
+        .chartXScale(domain: 0...xMax)
+        .frame(height: height)
+        .chartOverlay { _ in
+            GeometryReader { geo in
+                Color.clear.contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { drag in
+                                splitFraction = max(0.02, min(0.98, drag.location.x / geo.size.width))
+                            }
+                    )
+            }
         }
     }
 }

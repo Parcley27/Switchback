@@ -33,7 +33,7 @@ struct AccelerationSample: Identifiable {
 // MARK: - Peak event types
 
 enum PeakEventType: Int {
-    case maxSpeed = 0, peakAccel = 1, peakBraking = 2, peakRight = 3, peakLeft = 4
+    case maxSpeed = 0, peakAccel = 1, peakBraking = 2, peakRight = 3, peakLeft = 4, surface = 5
 
     var title: String {
         switch self {
@@ -42,6 +42,7 @@ enum PeakEventType: Int {
         case .peakBraking: return "Peak Braking"
         case .peakRight:   return "Peak Right Turn"
         case .peakLeft:    return "Peak Left Turn"
+        case .surface:     return "Road Surface"
         }
     }
 
@@ -50,8 +51,9 @@ enum PeakEventType: Int {
         case .maxSpeed:    return "flag.checkered"
         case .peakAccel:   return "bolt.fill"
         case .peakBraking: return "exclamationmark.triangle.fill"
-        case .peakRight:   return "arrow.turn.right.up"
-        case .peakLeft:    return "arrow.turn.left.up"
+        case .peakRight:   return "arrow.turn.up.right"
+        case .peakLeft:    return "arrow.turn.up.left"
+        case .surface:     return "car.rear.and.collision.road.lane"
         }
     }
 }

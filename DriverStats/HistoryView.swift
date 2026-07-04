@@ -36,6 +36,7 @@ struct HistoryView: View {
     @Query(sort: \DriveSession.startDate, order: .reverse) private var sessions: [DriveSession]
     @Environment(\.modelContext) private var modelContext
     @State private var showingAllDrivesMap = false
+    @State private var showingSurfaceMap = false
     @State private var editMode: EditMode = .inactive
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var showMergeConfirmation = false
@@ -50,6 +51,7 @@ struct HistoryView: View {
     @State private var customEndDate: Date = Date()
 
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
+    @AppStorage("ds.surfaceEventsMigrated") private var surfaceEventsMigrated = false
 
     var body: some View {
         HistoryListContent(
@@ -68,11 +70,17 @@ struct HistoryView: View {
         .navigationTitle("History")
         .searchable(text: $searchText, prompt: "Search drives…")
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItemGroup(placement: .navigationBarLeading) {
                 Button {
                     showingAllDrivesMap = true
                 } label: {
                     Image(systemName: "map")
+                }
+                .disabled(sessions.isEmpty)
+                Button {
+                    showingSurfaceMap = true
+                } label: {
+                    Image(systemName: "car.rear.and.collision.road.lane")
                 }
                 .disabled(sessions.isEmpty)
             }
@@ -123,6 +131,28 @@ struct HistoryView: View {
                         }
                     }
             }
+        }
+        .fullScreenCover(isPresented: $showingSurfaceMap) {
+            NavigationStack {
+                SurfaceMapView(sessions: sessions)
+                    .ignoresSafeArea(edges: .bottom)
+                    .navigationTitle("Road Surface Map")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showingSurfaceMap = false }
+                        }
+                    }
+            }
+        }
+        .task {
+            guard !surfaceEventsMigrated else { return }
+            let threshold = (UserDefaults.standard.object(forKey: "ds.surfaceThreshold") as? Double) ?? 0.4
+            for session in sessions where !session.rawVert.isEmpty {
+                session.recomputeSurfaceEvents(threshold: threshold)
+            }
+            try? modelContext.save()
+            surfaceEventsMigrated = true
         }
     }
 

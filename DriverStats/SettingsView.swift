@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
     @AppStorage("ds.geoLabels") private var geoLabels: Bool = true
+    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents: Bool = false
     
     @Environment(\.openURL) var openURL
 
@@ -194,6 +195,15 @@ struct SettingsView: View {
                 }
                 .tint(.green)
 
+                Toggle(isOn: $showSurfaceEvents) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Surface events on route map")
+                        Text("Show pothole and bump locations as colored circles on the single-drive map, grouped to 25 m.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.green)
+
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -324,6 +334,7 @@ struct SettingsView: View {
                 smoothWindowSeconds: motion.autoSmoothWindowSeconds,
                 suppressVertical: motion.suppressVerticalEvents
             )
+            session.recomputeSurfaceEvents(threshold: motion.surfaceThresholdG)
         }
         try? modelContext.save()
     }

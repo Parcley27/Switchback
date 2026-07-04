@@ -97,6 +97,10 @@ class MotionManager: ObservableObject {
     // Peak coordinate tracking keyed by event type
     private var peakTracker: [PeakEventType: (coord: CLLocationCoordinate2D, value: Double)] = [:]
 
+    // All surface event coordinates + peak g-value at time of detection (recorded at 10 Hz)
+    private var surfaceEventCoords: [(CLLocationCoordinate2D, Double)] = []
+    private var inSurfaceEventLive = false
+
     // Graph + stats buffer timing
     private var motionTick = 0
     private let graphDownsample = 5
@@ -146,6 +150,8 @@ class MotionManager: ObservableObject {
         accelSmoothing = []
         peakTracker = [:]
         peakEvents = []
+        surfaceEventCoords = []
+        inSurfaceEventLive = false
         ggSamples = []
         ggDownsampleTick = 0
         shouldStoreRaw = UserDefaults.standard.object(forKey: "ds.storeRawData") as? Bool ?? true
@@ -176,8 +182,13 @@ class MotionManager: ObservableObject {
             case .peakBraking: formatted = String(format: "%.2f g", data.value)
             case .peakRight:   formatted = String(format: "+%.2f g", data.value)
             case .peakLeft:    formatted = String(format: "%.2f g", data.value)
+            case .surface:     formatted = String(format: "%.2f g", data.value)
             }
             return PeakEvent(type: type, coordinate: data.coord, formatted: formatted)
+        }
+        // Append individual surface event coordinates (one entry per detected bump/pothole)
+        peakEvents += surfaceEventCoords.map { coord, g in
+            PeakEvent(type: .surface, coordinate: coord, formatted: String(format: "%.2f g", g))
         }
     }
 
@@ -360,6 +371,12 @@ class MotionManager: ObservableObject {
                     rawSessionLat.append(Float(rawVec.y))
                     rawSessionVert.append(Float(rawVec.z))
                 }
+                // Record surface event coordinate on each rising edge (matches 10 Hz recompute logic)
+                let isSurfaceNow = abs(rawVec.z) > surfaceThresholdG
+                if isSurfaceNow && !inSurfaceEventLive, let coord = currentCoordinate {
+                    surfaceEventCoords.append((coord, abs(rawVec.z)))
+                }
+                inSurfaceEventLive = isSurfaceNow
                 ggDownsampleTick += 1
                 if ggDownsampleTick % 5 == 0 {
                     ggSamples.append(GGPoint(lat: sv.y, fwd: sv.x))

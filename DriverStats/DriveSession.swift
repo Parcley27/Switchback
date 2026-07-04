@@ -265,6 +265,141 @@ final class DriveSession {
         smoothnessScore    = 0  // replaced by recompute()
     }
 
+    // MARK: - Split initializer
+
+    /// Creates one half of a session split at `routeIndex`. Pass `isFirst: true` for
+    /// the earlier portion, `isFirst: false` for the later portion. Call `recompute(…)`
+    /// immediately after inserting into the model context to derive accurate stats.
+    init(splitting original: DriveSession, at routeIndex: Int, isFirst: Bool) {
+        let routeCount = max(1, original.routeLatitudes.count)
+        let N          = max(1, min(routeIndex, routeCount - 1))
+        let rawCount   = original.rawFwd.count
+        let rawN       = rawCount > 0 ? Int(Double(N) / Double(routeCount) * Double(rawCount)) : 0
+        let frac       = Double(N) / Double(routeCount)
+        let dt         = original.durationSeconds / Double(routeCount)
+
+        if isFirst {
+            let speeds      = Array(original.routeSpeeds.prefix(N))
+            let dur         = original.durationSeconds * frac
+            let dist        = speeds.reduce(0.0, +) * dt
+            let stoppedDur  = Double(speeds.filter { $0 < 0.5 }.count) * dt
+
+            startDate           = original.startDate
+            durationSeconds     = dur
+            stoppingTimeSeconds = min(stoppedDur, dur)
+            stopCount           = Int((Double(original.stopCount) * frac).rounded())
+            totalDistanceM      = dist
+            maxSpeedMps         = speeds.max() ?? 0
+            avgSpeedMps         = dur > 0 ? dist / dur : 0
+            avgMovingSpeedMps   = dist / max(1, dur - stoppedDur)
+
+            routeLatitudes      = Array(original.routeLatitudes.prefix(N))
+            routeLongitudes     = Array(original.routeLongitudes.prefix(N))
+            routeSpeeds         = speeds
+            routeAltitudes      = Array(original.routeAltitudes.prefix(N))
+            startPlaceName      = original.startPlaceName
+            endPlaceName        = nil
+
+            let ggN      = Int(frac * Double(original.ggScatterLat.count))
+            ggScatterLat = Array(original.ggScatterLat.prefix(ggN))
+            ggScatterFwd = Array(original.ggScatterFwd.prefix(ggN))
+
+            rawFwd  = Array(original.rawFwd.prefix(rawN))
+            rawLat  = Array(original.rawLat.prefix(rawN))
+            rawVert = Array(original.rawVert.prefix(rawN))
+
+            var types: [Int] = []; var eLats: [Double] = []
+            var eLons: [Double] = []; var fmts: [String] = []
+            let evN = min(original.peakEventTypes.count,
+                          min(original.peakEventLats.count,
+                              min(original.peakEventLons.count, original.peakEventFormatted.count)))
+            for i in 0..<evN
+            where DriveSession.nearestRouteIdx(lat: original.peakEventLats[i],
+                                               lon: original.peakEventLons[i],
+                                               lats: original.routeLatitudes,
+                                               lons: original.routeLongitudes) < N {
+                types.append(original.peakEventTypes[i])
+                eLats.append(original.peakEventLats[i])
+                eLons.append(original.peakEventLons[i])
+                fmts.append(original.peakEventFormatted[i])
+            }
+            peakEventTypes = types; peakEventLats = eLats
+            peakEventLons  = eLons; peakEventFormatted = fmts
+
+        } else {
+            let speeds      = Array(original.routeSpeeds.dropFirst(N))
+            let dur         = original.durationSeconds * (1 - frac)
+            let dist        = speeds.reduce(0.0, +) * dt
+            let stoppedDur  = Double(speeds.filter { $0 < 0.5 }.count) * dt
+
+            startDate           = original.startDate.addingTimeInterval(original.durationSeconds * frac)
+            durationSeconds     = dur
+            stoppingTimeSeconds = min(stoppedDur, dur)
+            stopCount           = max(0, original.stopCount - Int((Double(original.stopCount) * frac).rounded()))
+            totalDistanceM      = dist
+            maxSpeedMps         = speeds.max() ?? 0
+            avgSpeedMps         = dur > 0 ? dist / dur : 0
+            avgMovingSpeedMps   = dist / max(1, dur - stoppedDur)
+
+            routeLatitudes      = Array(original.routeLatitudes.dropFirst(N))
+            routeLongitudes     = Array(original.routeLongitudes.dropFirst(N))
+            routeSpeeds         = speeds
+            routeAltitudes      = Array(original.routeAltitudes.dropFirst(N))
+            startPlaceName      = nil
+            endPlaceName        = original.endPlaceName
+
+            let ggN      = Int(frac * Double(original.ggScatterLat.count))
+            ggScatterLat = Array(original.ggScatterLat.dropFirst(ggN))
+            ggScatterFwd = Array(original.ggScatterFwd.dropFirst(ggN))
+
+            rawFwd  = Array(original.rawFwd.dropFirst(rawN))
+            rawLat  = Array(original.rawLat.dropFirst(rawN))
+            rawVert = Array(original.rawVert.dropFirst(rawN))
+
+            var types: [Int] = []; var eLats: [Double] = []
+            var eLons: [Double] = []; var fmts: [String] = []
+            let evN = min(original.peakEventTypes.count,
+                          min(original.peakEventLats.count,
+                              min(original.peakEventLons.count, original.peakEventFormatted.count)))
+            for i in 0..<evN
+            where DriveSession.nearestRouteIdx(lat: original.peakEventLats[i],
+                                               lon: original.peakEventLons[i],
+                                               lats: original.routeLatitudes,
+                                               lons: original.routeLongitudes) >= N {
+                types.append(original.peakEventTypes[i])
+                eLats.append(original.peakEventLats[i])
+                eLons.append(original.peakEventLons[i])
+                fmts.append(original.peakEventFormatted[i])
+            }
+            peakEventTypes = types; peakEventLats = eLats
+            peakEventLons  = eLons; peakEventFormatted = fmts
+        }
+
+        // Acceleration / jerk stats zeroed — recompute() derives them from raw samples
+        peakForward = 0; peakBraking = 0; avgLongitudinalAbs = 0; rmsForward = 0
+        hardAccelCount = 0; hardBrakingCount = 0
+        peakJerkForward = 0; peakJerkBraking = 0; avgJerkLongitudinalAbs = 0
+        peakRight = 0; peakLeft = 0; avgLateralAbs = 0; rmsLateral = 0
+        hardCorneringCount = 0
+        peakJerkRight = 0; peakJerkLeft = 0; avgJerkLateralAbs = 0
+        peakUp = 0; peakDown = 0; avgVerticalAbs = 0; rmsVertical = 0
+        peakJerkUp = 0; peakJerkDown = 0; avgJerkVerticalAbs = 0
+        peakNetAccel = 0; avgNetAccel = 0; rmsNet = 0; peakNetJerk = 0; avgNetJerk = 0
+        surfaceEventCount = 0; smoothnessScore = 0
+        lapSplitSeconds = []
+    }
+
+    private static func nearestRouteIdx(lat: Double, lon: Double,
+                                        lats: [Double], lons: [Double]) -> Int {
+        guard lats.count == lons.count, !lats.isEmpty else { return 0 }
+        var best = 0; var bestDist = Double.infinity
+        for j in 0..<lats.count {
+            let d = (lat - lats[j]) * (lat - lats[j]) + (lon - lons[j]) * (lon - lons[j])
+            if d < bestDist { bestDist = d; best = j }
+        }
+        return best
+    }
+
     // MARK: Computed helpers
 
     var movingTimeSeconds: Double { max(0, durationSeconds - stoppingTimeSeconds) }
@@ -373,6 +508,46 @@ final class DriveSession {
     var speedsKph: [Double] { routeSpeeds.map { $0 * 3.6 } }
 
     var altitudesM: [Double] { routeAltitudes }
+
+    /// Rebuilds surface-event annotations from the stored raw vertical samples,
+    /// replacing any previously stored surface entries. Requires rawVert to be populated
+    /// and at least 2 route points. Uses the same rising-edge detection as recompute().
+    func recomputeSurfaceEvents(threshold: Double) {
+        guard !rawVert.isEmpty, routeLatitudes.count >= 2 else { return }
+
+        // Strip existing surface entries (rawValue 5) from the parallel arrays
+        var types: [Int] = []; var lats: [Double] = []; var lons: [Double] = []; var fmts: [String] = []
+        let n = min(peakEventTypes.count, min(peakEventLats.count, min(peakEventLons.count, peakEventFormatted.count)))
+        for i in 0..<n where peakEventTypes[i] != 5 {
+            types.append(peakEventTypes[i])
+            lats.append(peakEventLats[i])
+            lons.append(peakEventLons[i])
+            fmts.append(peakEventFormatted[i])
+        }
+
+        // Detect rising edges in raw vertical and map sample index → nearest route coordinate
+        let rawCount = rawVert.count
+        let routeCount = routeLatitudes.count
+        var inSE = false
+        for i in 0..<rawCount {
+            let vz = Double(rawVert[i])
+            let nowSE = abs(vz) > threshold
+            if nowSE && !inSE {
+                let frac = Double(i) / Double(max(1, rawCount - 1))
+                let routeIdx = min(routeCount - 1, max(0, Int(frac * Double(routeCount - 1))))
+                types.append(5)
+                lats.append(routeLatitudes[routeIdx])
+                lons.append(routeLongitudes[routeIdx])
+                fmts.append(String(format: "%.2f g", abs(vz)))
+            }
+            inSE = nowSE
+        }
+
+        peakEventTypes     = types
+        peakEventLats      = lats
+        peakEventLons      = lons
+        peakEventFormatted = fmts
+    }
 
     var peakEventsRestored: [PeakEvent] {
         zip(zip(peakEventTypes, zip(peakEventLats, peakEventLons)), peakEventFormatted)
