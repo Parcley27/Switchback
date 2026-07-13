@@ -109,6 +109,7 @@ struct SessionResultsView: View {
 struct DriveSessionView: View {
     let session: DriveSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var showingSplitSheet = false
     private var stats: SessionStats { SessionStats(restoringFrom: session) }
 
@@ -121,15 +122,33 @@ struct DriveSessionView: View {
             lapSplits: session.lapSplitSeconds,
             dataSize: session.estimatedSizeBytes,
             rawFwd: session.rawFwd,
-            rawLat: session.rawLat
+            rawLat: session.rawLat,
+            driveMode: session.driveMode
         )
         .navigationTitle(session.routeLabel ?? "Drive Summary")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                if session.routeLatitudes.count >= 4 {
-                    Button { showingSplitSheet = true } label: {
-                        Label("Split Drive", systemImage: "scissors")
+                HStack(spacing: 4) {
+                    // Drive mode picker
+                    Menu {
+                        Picker("Drive Mode", selection: Binding(
+                            get: { session.driveMode },
+                            set: { session.driveMode = $0; try? modelContext.save() }
+                        )) {
+                            ForEach(DriveMode.allCases, id: \.self) { mode in
+                                Label(mode.label, systemImage: mode.sfSymbol).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Label(session.driveMode.label, systemImage: session.driveMode.sfSymbol)
+                            .foregroundStyle(session.driveMode.color)
+                    }
+
+                    if session.routeLatitudes.count >= 4 {
+                        Button { showingSplitSheet = true } label: {
+                            Label("Split Drive", systemImage: "scissors")
+                        }
                     }
                 }
             }
@@ -151,8 +170,8 @@ private struct DriveSessionContent: View {
     var dataSize: Int? = nil
     var rawFwd: [Float] = []
     var rawLat: [Float] = []
+    var driveMode: DriveMode = .normal
 
-    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents = false
     @State private var showingFullscreenMap = false
     @State private var scrubFraction: Double? = nil
 
@@ -186,8 +205,9 @@ private struct DriveSessionContent: View {
                 Section {
                     VStack(spacing: 0) {
                         RouteMapView(track: track, peakEvents: peakEvents,
-                                     showSurfaceEvents: showSurfaceEvents,
+                                     showSurfaceEvents: false,
                                      scrubCoordinate: scrubCoordinate,
+                                     trackColor: driveMode != .normal ? driveMode.uiColor : nil,
                                      onScrubFractionChanged: { scrubFraction = $0 })
                             .frame(height: 200)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -199,7 +219,11 @@ private struct DriveSessionContent: View {
                                     .padding(8)
                             }
                             .onTapGesture { showingFullscreenMap = true }
-                        speedLegend.padding(.top, 10)
+                        if driveMode == .normal {
+                            speedLegend.padding(.top, 10)
+                        } else {
+                            modeLegend.padding(.top, 10)
+                        }
                     }
                 }
                 .sheet(isPresented: $showingFullscreenMap) {
@@ -470,6 +494,21 @@ private struct DriveSessionContent: View {
         }
     }
 
+    private var modeLegend: some View {
+        HStack(spacing: 6) {
+            Image(systemName: driveMode.sfSymbol)
+                .font(.system(size: 10.5))
+                .foregroundStyle(driveMode.color)
+            Text(driveMode.label)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(driveMode.color)
+            Capsule()
+                .fill(driveMode.color)
+                .frame(height: 6)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
     private func fg(_ v: Double, signed: Bool = false) -> String {
         signed ? String(format: "%+.2f g", v) : String(format: "%.2f g", v)
     }
@@ -535,7 +574,6 @@ private struct FullscreenRouteView: View {
     var rawFwd: [Float] = []
     var rawLat: [Float] = []
 
-    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents = false
     @State private var scrubFraction: Double? = nil
 
     private var speeds: [Double] { track.map { $0.speedMps * 3.6 } }
@@ -553,7 +591,7 @@ private struct FullscreenRouteView: View {
             RouteMapView(
                 track: track,
                 peakEvents: peakEvents,
-                showSurfaceEvents: showSurfaceEvents,
+                showSurfaceEvents: false,
                 scrubCoordinate: scrubCoordinate,
                 onScrubFractionChanged: { scrubFraction = $0 }
             )

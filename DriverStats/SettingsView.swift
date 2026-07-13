@@ -19,8 +19,7 @@ struct SettingsView: View {
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
     @AppStorage("ds.mergeWindowMinutes") private var mergeWindowMinutes: Double = 15
     @AppStorage("ds.geoLabels") private var geoLabels: Bool = true
-    @AppStorage("ds.showSurfaceEvents") private var showSurfaceEvents: Bool = false
-    
+
     @Environment(\.openURL) var openURL
 
     @State private var needsRecompute = false
@@ -190,15 +189,6 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Show location names")
                         Text("Labels drives with neighborhood names (e.g. Brookswood → Creekside). Turn off to show date and time instead.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .tint(.green)
-
-                Toggle(isOn: $showSurfaceEvents) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Surface events on route map")
-                        Text("Show pothole and bump locations as colored circles on the single-drive map, grouped to 25 m.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

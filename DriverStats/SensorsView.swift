@@ -53,12 +53,12 @@ struct SensorsView: View {
             }
 
             Section {
-                AccelStrip(title: "Longitudinal · fwd + / brake −",
+                AccelStrip(title: feltDirection ? "Longitudinal · push fwd + / push back −" : "Longitudinal · fwd + / brake −",
                            samples: motion.recentSamples, value: \.forward,
-                           color: .accentColor)
-                AccelStrip(title: "Lateral · right + / left −",
+                           color: .accentColor, scale: feltDirection ? -1.0 : 1.0)
+                AccelStrip(title: feltDirection ? "Lateral · push left + / push right −" : "Lateral · right + / left −",
                            samples: motion.recentSamples, value: \.lateral,
-                           color: .green)
+                           color: .green, scale: feltDirection ? -1.0 : 1.0)
                 AccelStrip(title: "Vertical · bump + / dip −",
                            samples: motion.recentSamples, value: \.vertical,
                            color: .orange)

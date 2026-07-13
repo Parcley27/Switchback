@@ -76,8 +76,15 @@ struct AllDrivesMapView: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let renderer = MKPolylineRenderer(polyline: polyline)
-            let score = sessionForPolyline[ObjectIdentifier(polyline)]?.smoothnessScore ?? 50
-            renderer.strokeColor = scoreColor(score).withAlphaComponent(0.66)
+            let session = sessionForPolyline[ObjectIdentifier(polyline)]
+            let strokeColor: UIColor
+            if let session = session, session.driveMode != .normal {
+                strokeColor = session.driveMode.uiColor.withAlphaComponent(0.8)
+            } else {
+                let score = session?.smoothnessScore ?? 50
+                strokeColor = scoreColor(score).withAlphaComponent(0.66)
+            }
+            renderer.strokeColor = strokeColor
             renderer.lineWidth = 8
             renderer.lineCap = .round
             renderer.lineJoin = .round

@@ -33,6 +33,9 @@ struct RouteMapView: UIViewRepresentable {
     var thumbnailMode: Bool = false
     var showSurfaceEvents: Bool = false
     var scrubCoordinate: CLLocationCoordinate2D? = nil
+    /// When set, overrides the speed-gradient with a flat colour (used for non-normal drive modes).
+    /// In thumbnail mode, this replaces the default systemBlue.
+    var trackColor: UIColor? = nil
     /// Called with a 0–1 fraction when the user long-presses and drags along the route,
     /// or nil when the gesture ends. Ignored in thumbnailMode.
     var onScrubFractionChanged: ((Double?) -> Void)? = nil
@@ -61,6 +64,7 @@ struct RouteMapView: UIViewRepresentable {
 
     func updateUIView(_ map: MKMapView, context: Context) {
         context.coordinator.onScrubFractionChanged = onScrubFractionChanged
+        context.coordinator.trackColor = trackColor
         context.coordinator.setup(map: map, track: track, peakEvents: peakEvents,
                                   thumbnailMode: thumbnailMode, showSurfaceEvents: showSurfaceEvents)
         context.coordinator.updateScrub(map: map, coordinate: scrubCoordinate)
@@ -72,6 +76,7 @@ struct RouteMapView: UIViewRepresentable {
         private var lastTrackSignature: Int = -1
         private var lastPeakEventCount: Int = -1
         private var lastShowSurfaceEvents: Bool = false
+        var trackColor: UIColor? = nil
         private(set) var thumbnailMode: Bool = false
         // parallel to the polyline currently on the map
         var speedsAtPoints: [Double] = []
@@ -209,9 +214,19 @@ struct RouteMapView: UIViewRepresentable {
 
             if thumbnailMode {
                 let renderer = MKPolylineRenderer(polyline: polyline)
-                renderer.strokeColor = UIColor.systemBlue
+                renderer.strokeColor = trackColor ?? UIColor.systemBlue
                 renderer.lineWidth = 2
                 renderer.lineCap = .round
+                return renderer
+            }
+
+            // Flat colour override for non-normal drive modes
+            if let flatColor = trackColor {
+                let renderer = MKPolylineRenderer(polyline: polyline)
+                renderer.strokeColor = flatColor
+                renderer.lineWidth = 5
+                renderer.lineCap = .round
+                renderer.lineJoin = .round
                 return renderer
             }
 

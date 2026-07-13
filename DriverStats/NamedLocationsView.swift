@@ -20,8 +20,38 @@ struct NamedLocationsView: View {
     /// Names of locations that existed when this screen appeared, so deletions can be detected.
     @State private var knownNamesOnAppear: Set<String> = []
 
+    // Bulk geocode state
+    @State private var showingRefreshOptions = false
+    @State private var geocodeTask: Task<Void, Never>? = nil
+    @State private var geocodeProgress: (done: Int, total: Int)? = nil
+
     var body: some View {
         List {
+            // In-progress geocode banner
+            if let progress = geocodeProgress {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Refreshing place names…")
+                                .font(.subheadline.weight(.medium))
+                            Text("\(progress.done) of \(progress.total) drives")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Cancel") {
+                            geocodeTask?.cancel()
+                            geocodeTask = nil
+                            geocodeProgress = nil
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.red)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
             if locations.isEmpty {
                 ContentUnavailableView(
                     "No Named Locations",
@@ -59,11 +89,42 @@ struct NamedLocationsView: View {
                     Image(systemName: "plus")
                 }
             }
-            if !locations.isEmpty {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if geocodeProgress != nil {
+                    // hide edit button while geocoding to avoid conflicting states
+                    EmptyView()
+                } else {
+                    Menu {
+                        if !locations.isEmpty {
+                            // This is handled by the List's EditButton placement inline
+                        }
+                        Button {
+                            showingRefreshOptions = true
+                        } label: {
+                            Label("Refresh Place Names…", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(geocodeProgress != nil)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            if !locations.isEmpty && geocodeProgress == nil {
                 ToolbarItem(placement: .navigationBarLeading) {
                     EditButton()
                 }
             }
+        }
+        .confirmationDialog("Refresh Place Names", isPresented: $showingRefreshOptions) {
+            Button("Unlabeled Drives Only") {
+                startGeocode(forceAll: false)
+            }
+            Button("All Drives", role: .destructive) {
+                startGeocode(forceAll: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Re-runs reverse geocoding using your current location. \"Unlabeled\" only processes drives that failed to get a name (e.g. recorded offline). \"All Drives\" overwrites existing names.")
         }
         .sheet(isPresented: $showingAdd) {
             NamedLocationFormView(existing: nil)
@@ -75,7 +136,84 @@ struct NamedLocationsView: View {
             knownNamesOnAppear = Set(locations.map(\.name))
         }
         .onDisappear {
+            geocodeTask?.cancel()
             propagateToAllSessions()
+        }
+    }
+
+    // MARK: - Bulk geocode
+
+    private func startGeocode(forceAll: Bool) {
+        let descriptor = FetchDescriptor<DriveSession>()
+        guard let all = try? modelContext.fetch(descriptor) else { return }
+
+        let targets: [DriveSession]
+        if forceAll {
+            targets = all.filter { $0.routeLatitudes.count >= 2 }
+        } else {
+            targets = all.filter {
+                $0.routeLatitudes.count >= 2
+                && ($0.startPlaceName == nil || $0.endPlaceName == nil)
+            }
+        }
+
+        guard !targets.isEmpty else { return }
+
+        geocodeProgress = (done: 0, total: targets.count)
+
+        geocodeTask = Task {
+            for (i, session) in targets.enumerated() {
+                guard !Task.isCancelled else { break }
+
+                let lats = session.routeLatitudes
+                let lons = session.routeLongitudes
+                let startCoord = CLLocationCoordinate2D(latitude: lats[0], longitude: lons[0])
+                let endCoord   = CLLocationCoordinate2D(latitude: lats[lats.count - 1], longitude: lons[lons.count - 1])
+                let currentLocations = locations  // capture current named locations
+
+                // Named location takes priority over geocoding
+                if forceAll || session.startPlaceName == nil {
+                    if let named = namedLocationName(for: startCoord, in: currentLocations) {
+                        session.startPlaceName = named
+                    } else {
+                        session.startPlaceName = await reverseGeocode(startCoord)
+                        // Throttle to respect geocoding rate limits
+                        try? await Task.sleep(for: .milliseconds(350))
+                    }
+                }
+
+                guard !Task.isCancelled else { break }
+
+                if forceAll || session.endPlaceName == nil {
+                    if let named = namedLocationName(for: endCoord, in: currentLocations) {
+                        session.endPlaceName = named
+                    } else {
+                        session.endPlaceName = await reverseGeocode(endCoord)
+                        try? await Task.sleep(for: .milliseconds(350))
+                    }
+                }
+
+                try? modelContext.save()
+                geocodeProgress = (done: i + 1, total: targets.count)
+            }
+
+            geocodeTask = nil
+            geocodeProgress = nil
+        }
+    }
+
+    private func namedLocationName(for coordinate: CLLocationCoordinate2D,
+                                   in locs: [NamedLocation]) -> String? {
+        locs.filter { $0.contains(coordinate) }.min(by: { $0.radius < $1.radius })?.name
+    }
+
+    private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) async -> String? {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
+        return await withCheckedContinuation { continuation in
+            request.getMapItems { items, _ in
+                continuation.resume(returning: items?.first?.addressRepresentations?.cityName)
+            }
         }
     }
 
@@ -142,6 +280,7 @@ struct NamedLocationFormView: View {
 
     @State private var name: String = ""
     @State private var radius: Double = 200
+    @State private var radiusText: String = "200"
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var coordinate: CLLocationCoordinate2D = CLLocationCoordinate2D(latitude: 0, longitude: 0)
     @State private var hasCoordinate = false
@@ -192,23 +331,36 @@ struct NamedLocationFormView: View {
                         HStack {
                             Text("Match radius")
                             Spacer()
-                            Text(radius >= 1000
-                                 ? String(format: "%.1f km", radius / 1000)
-                                 : String(format: "%.0f m", radius))
-                                .font(.system(.footnote, design: .monospaced))
-                                .foregroundStyle(Color.accentColor)
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                TextField("radius", text: $radiusText)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 72)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .foregroundStyle(Color.accentColor)
+                                    .onSubmit { commitRadiusText() }
+                                Text("m")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        Slider(value: $radius, in: 50...2000, step: 50)
+                        if radius >= 1000 {
+                            Text(String(format: "= %.2f km", radius / 1000))
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                        Slider(value: $radius, in: 50...10000, step: 50)
                             .tint(.accentColor)
+                            .onChange(of: radius) { radiusText = String(Int(radius)) }
                         HStack {
                             Text("50 m").font(.caption2).foregroundStyle(.tertiary)
                             Spacer()
-                            Text("2 km").font(.caption2).foregroundStyle(.tertiary)
+                            Text("10 km").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }
                     .padding(.vertical, 4)
                 } footer: {
-                    Text("Drives that start or end within this distance use this name instead of the geocoded neighbourhood.")
+                    Text("Type any value or use the slider. Drives that start or end within this distance use this name instead of the geocoded neighbourhood.")
                 }
             }
             .navigationTitle(existing == nil ? "Add Location" : "Edit Location")
@@ -229,10 +381,17 @@ struct NamedLocationFormView: View {
         }
     }
 
+    private func commitRadiusText() {
+        let parsed = Double(radiusText.trimmingCharacters(in: .whitespaces)) ?? radius
+        radius = max(50, parsed)
+        radiusText = String(Int(radius))
+    }
+
     private func setupInitialState() {
         if let loc = existing {
             name = loc.name
             radius = loc.radius
+            radiusText = String(Int(loc.radius))
             let coord = CLLocationCoordinate2D(latitude: loc.latitude, longitude: loc.longitude)
             coordinate = coord
             hasCoordinate = true

@@ -15,6 +15,7 @@ struct DriverStatsApp: App {
             Item.self,
             DriveSession.self,
             NamedLocation.self,
+            Trip.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

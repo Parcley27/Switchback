@@ -34,12 +34,14 @@ private enum DurationFilter: String, CaseIterable, Hashable {
 
 struct HistoryView: View {
     @Query(sort: \DriveSession.startDate, order: .reverse) private var sessions: [DriveSession]
+    @Query(sort: \Trip.createdDate, order: .reverse) private var trips: [Trip]
     @Environment(\.modelContext) private var modelContext
     @State private var showingAllDrivesMap = false
     @State private var showingSurfaceMap = false
     @State private var editMode: EditMode = .inactive
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var showMergeConfirmation = false
+    @State private var pendingNewTrip: Trip? = nil
 
     // Search & filter
     @State private var searchText: String = ""
@@ -56,6 +58,7 @@ struct HistoryView: View {
     var body: some View {
         HistoryListContent(
             sessions: sessions,
+            trips: trips,
             searchText: $searchText,
             activeTimeFilter: $activeTimeFilter,
             activeDurationFilter: $activeDurationFilter,
@@ -85,9 +88,16 @@ struct HistoryView: View {
                 .disabled(sessions.isEmpty)
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if editMode == .active, mergeCandidate != nil {
-                    Button("Merge") {
-                        showMergeConfirmation = true
+                if editMode == .active {
+                    if mergeCandidate != nil {
+                        Button("Merge") {
+                            showMergeConfirmation = true
+                        }
+                    }
+                    if selection.count >= 2 {
+                        Button("Trip") {
+                            performCreateTrip()
+                        }
                     }
                 }
                 Button(editMode == .active ? "Done" : "Edit") {
@@ -108,6 +118,16 @@ struct HistoryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The gap between these drives will count as stopping time. Both original sessions will be replaced by a single combined session.")
+        }
+        .sheet(item: $pendingNewTrip) { trip in
+            NavigationStack {
+                TripView(trip: trip)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { pendingNewTrip = nil }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: $showDateRangePicker) {
             DateRangePickerSheet(
@@ -172,6 +192,13 @@ struct HistoryView: View {
 
     private func performMerge() {
         guard let (first, second) = mergeCandidate else { return }
+        // If both sessions belong to the same trip, keep the merged result in that trip
+        let sharedTrip: Trip?
+        if let t1 = first.trip, let t2 = second.trip, t1.persistentModelID == t2.persistentModelID {
+            sharedTrip = t1
+        } else {
+            sharedTrip = nil
+        }
         let merged = DriveSession(merging: first, with: second)
         let ud = UserDefaults.standard
         merged.recompute(
@@ -182,11 +209,29 @@ struct HistoryView: View {
             suppressVertical:    (ud.object(forKey: "ds.suppressVertical") as? Bool)   ?? true
         )
         modelContext.insert(merged)
+        merged.trip = sharedTrip
         modelContext.delete(first)
         modelContext.delete(second)
         try? modelContext.save()
         selection.removeAll()
         withAnimation { editMode = .inactive }
+    }
+
+    // MARK: - Trip creation
+
+    private func performCreateTrip() {
+        guard selection.count >= 2 else { return }
+        let picked = sessions.filter { selection.contains($0.persistentModelID) }
+        guard picked.count >= 2 else { return }
+        let trip = Trip()
+        modelContext.insert(trip)
+        for session in picked {
+            session.trip = trip
+        }
+        try? modelContext.save()
+        selection.removeAll()
+        withAnimation { editMode = .inactive }
+        pendingNewTrip = trip
     }
 }
 
@@ -194,6 +239,7 @@ struct HistoryView: View {
 
 private struct HistoryListContent: View {
     let sessions: [DriveSession]
+    let trips: [Trip]
     @Binding var searchText: String
     @Binding var activeTimeFilter: TimeFilter?
     @Binding var activeDurationFilter: DurationFilter?
@@ -336,6 +382,29 @@ private struct HistoryListContent: View {
                     }
                 }
 
+                // Trips section (hidden while searching/filtering)
+                if !isFiltering && !trips.isEmpty {
+                    Section {
+                        ForEach(trips) { trip in
+                            NavigationLink(destination: TripView(trip: trip)) {
+                                TripCardView(trip: trip)
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        }
+                        .onDelete { indexSet in
+                            indexSet.forEach { modelContext.delete(trips[$0]) }
+                        }
+                    } header: {
+                        Text("Trips")
+                            .font(.footnote).fontWeight(.medium)
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                            .tracking(0.3)
+                    }
+                }
+
                 // Filter chips
                 Section {
                     FilterChipRow(
@@ -375,6 +444,26 @@ private struct HistoryListContent: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                            .contextMenu {
+                                if let existingTrip = session.trip {
+                                    Button(role: .destructive) {
+                                        session.trip = nil
+                                        try? modelContext.save()
+                                    } label: {
+                                        Label("Remove from \"\(existingTrip.name)\"",
+                                              systemImage: "minus.circle")
+                                    }
+                                } else if !trips.isEmpty {
+                                    Menu("Add to Trip") {
+                                        ForEach(trips) { trip in
+                                            Button(trip.name) {
+                                                session.trip = trip
+                                                try? modelContext.save()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         .onDelete { indexSet in
                             indexSet.forEach { modelContext.delete(filteredSessions[$0]) }
@@ -598,7 +687,8 @@ private struct SessionCardView: View {
         HStack(spacing: 12) {
             Group {
                 if session.routePoints.count >= 2 {
-                    RouteMapView(track: thumbnailTrack, peakEvents: [], thumbnailMode: true)
+                    RouteMapView(track: thumbnailTrack, peakEvents: [], thumbnailMode: true,
+                                 trackColor: session.driveMode.uiColor)
                         .allowsHitTesting(false)
                 } else {
                     Color(.tertiarySystemFill)
@@ -610,9 +700,20 @@ private struct SessionCardView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(primaryLabel)
-                            .font(.system(size: 14.5, weight: .semibold))
-                            .lineLimit(1)
+                        HStack(spacing: 5) {
+                            Text(primaryLabel)
+                                .font(.system(size: 14.5, weight: .semibold))
+                                .lineLimit(1)
+                            if session.driveMode != .normal {
+                                Label(session.driveMode.label, systemImage: session.driveMode.sfSymbol)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(session.driveMode.color)
+                                    .labelStyle(.iconOnly)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(session.driveMode.color.opacity(0.12), in: Capsule())
+                            }
+                        }
                         if geoLabels && session.routeLabel != nil {
                             Text(session.startDate.formatted(date: .abbreviated, time: .omitted))
                                 .font(.system(size: 11.5))
@@ -623,7 +724,7 @@ private struct SessionCardView: View {
                             .foregroundStyle(.tertiary)
                     }
                     Spacer()
-                    if showDrivingScore {
+                    if showDrivingScore && session.driveMode.receivesScore {
                         ScoreRing(value: score, size: 34)
                     }
                 }
@@ -631,18 +732,26 @@ private struct SessionCardView: View {
                 HStack(spacing: 12) {
                     Text(formatDistance(session.totalDistanceM))
                     Text(formatDuration(session.durationSeconds))
-                    Text("\(Int(session.maxSpeedMps * 3.6)) km/h")
-                        .foregroundStyle(Color.accentColor)
-                    Text(String(format: "%.2f g", session.peakNetAccel))
+                    if session.driveMode.receivesScore {
+                        Text("\(Int(session.maxSpeedMps * 3.6)) km/h")
+                            .foregroundStyle(Color.accentColor)
+                        Text(String(format: "%.2f g", session.peakNetAccel))
+                    }
                 }
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-                let hardTotal = session.hardAccelCount + session.hardBrakingCount + session.hardCorneringCount
-                Text("\(hardTotal) hard event\(hardTotal == 1 ? "" : "s") logged")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.tertiary)
+                if session.driveMode.receivesScore {
+                    let hardTotal = session.hardAccelCount + session.hardBrakingCount + session.hardCorneringCount
+                    Text("\(hardTotal) hard event\(hardTotal == 1 ? "" : "s") logged")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("Route only — no score")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(12)

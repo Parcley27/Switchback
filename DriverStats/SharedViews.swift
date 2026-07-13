@@ -330,6 +330,7 @@ struct GGDiagram: View {
     var showEnvelope: Bool = false
     var showTrail: Bool = false
     var current: GGPoint? = nil
+    var isFelt: Bool = false
 
     var body: some View {
         let hull = showEnvelope ? Self.convexHull(points) : []
@@ -406,8 +407,8 @@ struct GGDiagram: View {
                 context.fill(inner, with: .color(Color.accentColor))
             }
         }
-        .overlay(alignment: .top)     { Text("accel").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.top, 4) }
-        .overlay(alignment: .bottom)  { Text("brake").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.bottom, 4) }
+        .overlay(alignment: .top)     { Text(isFelt ? "fwd" : "accel").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.top, 4) }
+        .overlay(alignment: .bottom)  { Text(isFelt ? "back" : "brake").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.bottom, 4) }
         .overlay(alignment: .trailing){ Text("right").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.trailing, 4) }
         .overlay(alignment: .leading) { Text("left").font(.system(size: 8.5)).foregroundStyle(.tertiary).padding(.leading, 4) }
         .frame(width: size, height: size)
@@ -493,6 +494,7 @@ struct AccelStrip: View {
     let samples: [AccelerationSample]
     let value: KeyPath<AccelerationSample, Double>
     var color: Color = .accentColor
+    var scale: Double = 1.0
 
     private var xDomain: ClosedRange<Double> {
         guard let last = samples.last else { return 0...15 }
@@ -514,7 +516,7 @@ struct AccelStrip: View {
             }
             Chart {
                 ForEach(samples) { sample in
-                    LineMark(x: .value("t", sample.elapsedSeconds), y: .value("g", sample[keyPath: value]))
+                    LineMark(x: .value("t", sample.elapsedSeconds), y: .value("g", sample[keyPath: value] * scale))
                         .foregroundStyle(color).lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
                 RuleMark(y: .value("zero", 0)).foregroundStyle(Color(.separator)).lineStyle(StrokeStyle(dash: [3, 4]))

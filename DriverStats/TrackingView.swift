@@ -14,6 +14,7 @@ struct TrackingView: View {
     @Binding var isTracking: Bool
 
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
+    @AppStorage("ds.feltDirection") private var feltDirection: Bool = false
     @State private var sessionResult: SessionResult? = nil
 
     private var stats: SessionStats? { motion.sessionStats }
@@ -121,7 +122,8 @@ struct TrackingView: View {
                         gmax: 0.7,
                         size: diagramSize,
                         showTrail: true,
-                        current: ggCurrent
+                        current: ggCurrent,
+                        isFelt: feltDirection
                     )
                     .frame(maxWidth: .infinity)
 
@@ -247,11 +249,13 @@ struct TrackingView: View {
     // MARK: - Live G values
 
     private var liveForwardStr: String {
-        motion.displayAcceleration.map { String(format: "%+.2f g", $0.forward) } ?? "—"
+        let s = feltDirection ? -1.0 : 1.0
+        return motion.displayAcceleration.map { String(format: "%+.2f g", $0.forward * s) } ?? "—"
     }
 
     private var liveLateralStr: String {
-        motion.displayAcceleration.map { String(format: "%+.2f g", $0.lateral) } ?? "—"
+        let s = feltDirection ? -1.0 : 1.0
+        return motion.displayAcceleration.map { String(format: "%+.2f g", $0.lateral * s) } ?? "—"
     }
 
     private var liveVerticalStr: String {
@@ -289,12 +293,14 @@ struct TrackingView: View {
     // MARK: - GG helpers
 
     private var ggTrail: [GGPoint] {
-        motion.recentSamples.map { GGPoint(lat: $0.lateral, fwd: $0.forward) }
+        let s = feltDirection ? -1.0 : 1.0
+        return motion.recentSamples.map { GGPoint(lat: $0.lateral * s, fwd: $0.forward * s) }
     }
 
     private var ggCurrent: GGPoint? {
         guard let a = motion.displayAcceleration else { return nil }
-        return GGPoint(lat: a.lateral, fwd: a.forward)
+        let s = feltDirection ? -1.0 : 1.0
+        return GGPoint(lat: a.lateral * s, fwd: a.forward * s)
     }
 
     // MARK: - Heading helpers
