@@ -168,10 +168,17 @@ struct HistoryView: View {
         .task {
             guard !surfaceEventsMigrated else { return }
             let threshold = (UserDefaults.standard.object(forKey: "ds.surfaceThreshold") as? Double) ?? 0.4
-            for session in sessions where !session.rawVert.isEmpty {
-                session.recomputeSurfaceEvents(threshold: threshold)
-            }
-            try? modelContext.save()
+            let container = modelContext.container
+            // Run on a background ModelContext so the main thread stays free
+            await Task.detached(priority: .background) {
+                let ctx = ModelContext(container)
+                let descriptor = FetchDescriptor<DriveSession>()
+                guard let all = try? ctx.fetch(descriptor) else { return }
+                for session in all where !session.rawVert.isEmpty {
+                    session.recomputeSurfaceEvents(threshold: threshold)
+                }
+                try? ctx.save()
+            }.value
             surfaceEventsMigrated = true
         }
     }
@@ -311,74 +318,15 @@ private struct HistoryListContent: View {
         } else {
             List(selection: $selection) {
                 // Aggregate stats + smoothness trend
+                // HistoryStatsHeader is Equatable; SwiftUI skips re-evaluation while
+                // sessions are unchanged, so typing/filter/edit-mode changes don't
+                // re-run the O(n) aggregate scans.
                 if !isFiltering {
                     Section {
-                        VStack(spacing: 18) {
-                            NavigationLink(destination: HistoryStatsView(sessions: sessions)) {
-                                HStack {
-                                    Text("Full statistics")
-                                        .font(.footnote).fontWeight(.medium)
-                                        .textCase(.uppercase)
-                                        .foregroundStyle(.secondary)
-                                        .tracking(0.3)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            LazyVGrid(
-                                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
-                                spacing: 10
-                            ) {
-                                StatCell(label: "Avg score",
-                                         value: String(format: "%.0f", avgScore),
-                                         accent: true)
-                                StatCell(label: "Best peak",
-                                         value: String(format: "%.2f", bestPeakG),
-                                         unit: "g")
-                                StatCell(label: "All drives",
-                                         value: "\(sessions.count)")
-                                StatCell(label: "This week",
-                                         value: String(format: "%.0f", thisWeekKm),
-                                         unit: "km")
-                                StatCell(label: "Total dist",
-                                         value: String(format: "%.0f", totalKm),
-                                         unit: "km")
-                                StatCell(label: "Total time",
-                                         value: formatTotalDrivingTime(totalDuration))
-                            }
-
-                            if trendScores.count >= 3 {
-                                CardSection("Smoothness trend",
-                                            note: "last \(trendScores.count)",
-                                            innerPadding: 12) {
-                                    Chart {
-                                        ForEach(Array(trendScores.enumerated()), id: \.offset) { i, score in
-                                            AreaMark(x: .value("Drive", i + 1), y: .value("Score", score))
-                                                .foregroundStyle(Color.accentColor.opacity(0.12))
-                                            LineMark(x: .value("Drive", i + 1), y: .value("Score", score))
-                                                .foregroundStyle(Color.accentColor)
-                                                .lineStyle(StrokeStyle(lineWidth: 1.6))
-                                        }
-                                    }
-                                    .chartYScale(domain: 0...100)
-                                    .chartYAxis {
-                                        AxisMarks(values: [0, 50, 100]) {
-                                            AxisGridLine()
-                                            AxisValueLabel()
-                                        }
-                                    }
-                                    .chartXAxis {
-                                        AxisMarks(values: .automatic(desiredCount: min(trendScores.count, 6))) {
-                                            AxisGridLine()
-                                            AxisValueLabel()
-                                        }
-                                    }
-                                    .frame(height: 90)
-                                }
-                            }
-                        }
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                        HistoryStatsHeader(sessions: sessions)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
                     }
                 }
 
@@ -490,7 +438,89 @@ private struct HistoryListContent: View {
         }
     }
 
-    // MARK: - Aggregates
+}
+
+// MARK: - Aggregate stats header
+// Equatable so SwiftUI can skip re-evaluation when sessions haven't changed.
+// Typing in the search bar, toggling filters, or changing edit selection do NOT
+// alter the sessions array, so the six O(n) scans and the trend chart are bypassed.
+
+private struct HistoryStatsHeader: View, Equatable {
+    let sessions: [DriveSession]
+
+    static func == (lhs: HistoryStatsHeader, rhs: HistoryStatsHeader) -> Bool {
+        guard lhs.sessions.count == rhs.sessions.count else { return false }
+        return zip(lhs.sessions, rhs.sessions).allSatisfy { $0 === $1 }
+    }
+
+    var body: some View {
+        VStack(spacing: 18) {
+            NavigationLink(destination: HistoryStatsView(sessions: sessions)) {
+                HStack {
+                    Text("Full statistics")
+                        .font(.footnote).fontWeight(.medium)
+                        .textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                        .tracking(0.3)
+                }
+            }
+            .buttonStyle(.plain)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                spacing: 10
+            ) {
+                StatCell(label: "Avg score",
+                         value: String(format: "%.0f", avgScore),
+                         accent: true)
+                StatCell(label: "Best peak",
+                         value: String(format: "%.2f", bestPeakG),
+                         unit: "g")
+                StatCell(label: "All drives",
+                         value: "\(sessions.count)")
+                StatCell(label: "This week",
+                         value: String(format: "%.0f", thisWeekKm),
+                         unit: "km")
+                StatCell(label: "Total dist",
+                         value: String(format: "%.0f", totalKm),
+                         unit: "km")
+                StatCell(label: "Total time",
+                         value: formatTotalDrivingTime(totalDuration))
+            }
+
+            if trendScores.count >= 3 {
+                CardSection("Smoothness trend",
+                            note: "last \(trendScores.count)",
+                            innerPadding: 12) {
+                    Chart {
+                        ForEach(Array(trendScores.enumerated()), id: \.offset) { i, score in
+                            AreaMark(x: .value("Drive", i + 1), y: .value("Score", score))
+                                .foregroundStyle(Color.accentColor.opacity(0.12))
+                            LineMark(x: .value("Drive", i + 1), y: .value("Score", score))
+                                .foregroundStyle(Color.accentColor)
+                                .lineStyle(StrokeStyle(lineWidth: 1.6))
+                        }
+                    }
+                    .chartYScale(domain: 0...100)
+                    .chartYAxis {
+                        AxisMarks(values: [0, 50, 100]) {
+                            AxisGridLine()
+                            AxisValueLabel()
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: min(trendScores.count, 6))) {
+                            AxisGridLine()
+                            AxisValueLabel()
+                        }
+                    }
+                    .frame(height: 90)
+                }
+            }
+        }
+    }
+
+    // MARK: Aggregates (only run when sessions actually changes)
 
     private var totalKm: Double {
         sessions.reduce(0) { $0 + $1.totalDistanceM } / 1000
@@ -503,15 +533,7 @@ private struct HistoryListContent: View {
 
     private var avgScore: Double {
         guard !sessions.isEmpty else { return 0 }
-        return sessions.reduce(0) { $0 + computeScore(for: $1) } / Double(sessions.count)
-    }
-
-    private func computeScore(for s: DriveSession) -> Double {
-        let movingMin = max(1.0, s.movingTimeSeconds / 60)
-        let hard = Double(s.hardAccelCount + s.hardBrakingCount + s.hardCorneringCount)
-        return max(0, min(100, 100 - 20 * (hard / movingMin)
-            - 30 * min(max(s.rmsNet, 0), 1)
-            - 8  * min(max(s.peakNetJerk / 10, 0), 1)))
+        return sessions.reduce(0) { $0 + $1.smoothnessScore } / Double(sessions.count)
     }
 
     private func formatTotalDrivingTime(_ seconds: Double) -> String {
@@ -656,21 +678,8 @@ private struct SessionCardView: View {
     @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
     @AppStorage("ds.geoLabels") private var geoLabels = true
 
-    private var thumbnailTrack: [RoutePoint] {
-        let pts = session.routePoints
-        guard pts.count > 40 else { return pts }
-        let step = max(1, pts.count / 40)
-        return stride(from: 0, to: pts.count, by: step).map { pts[$0] }
-    }
-
-    private var score: Int {
-        let movingMin = max(1.0, session.movingTimeSeconds / 60)
-        let hard = Double(session.hardAccelCount + session.hardBrakingCount + session.hardCorneringCount)
-        let v = 100 - 20 * (hard / movingMin)
-            - 30 * min(max(session.rmsNet, 0), 1)
-            - 8  * min(max(session.peakNetJerk / 10, 0), 1)
-        return Int(max(0, min(100, v)))
-    }
+    // Read the stored score — avoids re-deriving from raw arrays on every body eval
+    private var score: Int { Int(session.smoothnessScore) }
 
     private var primaryLabel: String {
         if geoLabels, let label = session.routeLabel { return label }
@@ -685,17 +694,11 @@ private struct SessionCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Group {
-                if session.routePoints.count >= 2 {
-                    RouteMapView(track: thumbnailTrack, peakEvents: [], thumbnailMode: true,
-                                 trackColor: session.driveMode.uiColor)
-                        .allowsHitTesting(false)
-                } else {
-                    Color(.tertiarySystemFill)
-                }
-            }
-            .frame(width: 76, height: 70)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // RouteThumbnailView replaces the per-row live MKMapView:
+            // snapshot is built once, cached to memory+disk, and reused on scroll.
+            RouteThumbnailView(session: session)
+                .frame(width: 76, height: 70)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .top) {

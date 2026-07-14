@@ -24,6 +24,7 @@ struct SettingsView: View {
 
     @State private var needsRecompute = false
     @State private var showEraseConfirmation = false
+    @State private var thumbnailCacheSize: Int = 0
 
     var body: some View {
         List {
@@ -259,6 +260,28 @@ struct SettingsView: View {
                 
             }
             
+            // MARK: Storage
+            Section("Storage") {
+                Button {
+                    RouteSnapshotCache.shared.clearAll()
+                    thumbnailCacheSize = 0
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Clear Thumbnail Cache")
+                            if thumbnailCacheSize > 0 {
+                                Text(thumbnailCacheSize.formattedBytes)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "photo.on.rectangle.angled")
+                    }
+                }
+                .foregroundStyle(Color(.label))
+            }
+            .onAppear { thumbnailCacheSize = RouteSnapshotCache.shared.diskSizeBytes }
+
             // MARK: Danger Zone
             Section("Danger Zone") {
                 Button {

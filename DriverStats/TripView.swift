@@ -298,14 +298,7 @@ struct TripCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Group {
-                if !trip.sessions.isEmpty {
-                    AllDrivesMapView(sessions: trip.sessions)
-                        .allowsHitTesting(false)
-                } else {
-                    Color(.tertiarySystemFill)
-                }
-            }
+            TripThumbnailView(trip: trip)
             .frame(width: 76, height: 70)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 

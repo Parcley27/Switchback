@@ -2,96 +2,108 @@
 //  SurfaceMapView.swift
 //  DriverStats
 //
-//  Created by Pierce Oxley on 6/30/26.
-//
 
 import MapKit
 import SwiftUI
 
-// MARK: - Cluster model
+// MARK: - Pre-computed per-session roughness data
 
-private struct SurfaceCluster {
-    let coordinate: CLLocationCoordinate2D
-    let count: Int
-    let maxGForce: Double
+private struct SessionRoughnessData: Sendable {
+    let coords: [CLLocationCoordinate2D]
+    let roughness: [Float]   // one value per coord; 0 = no event nearby, >0 = g-force
 }
 
 // MARK: - Top-level SwiftUI wrapper
 
 struct SurfaceMapView: View {
     let sessions: [DriveSession]
-    @State private var showRoutes = false
 
-    private var clusters: [SurfaceCluster] {
-        let cellDeg = 50.0 / 111_000.0
-        var cells: [SIMD2<Int>: [(CLLocationCoordinate2D, Double)]] = [:]
-        for session in sessions {
-            for event in session.peakEventsRestored where event.type == .surface {
-                let key = SIMD2<Int>(
-                    Int(floor(event.coordinate.latitude  / cellDeg)),
-                    Int(floor(event.coordinate.longitude / cellDeg))
-                )
-                let gVal = Double(event.formatted.components(separatedBy: " ").first ?? "0") ?? 0
-                cells[key, default: []].append((event.coordinate, gVal))
-            }
-        }
-        return cells.values.compactMap { items -> SurfaceCluster? in
-            guard !items.isEmpty else { return nil }
-            let lat  = items.map(\.0.latitude).reduce(0,  +) / Double(items.count)
-            let lon  = items.map(\.0.longitude).reduce(0, +) / Double(items.count)
-            let maxG = items.map(\.1).max() ?? 0.4
-            return SurfaceCluster(
-                coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                count: items.count,
-                maxGForce: maxG
-            )
+    @State private var polylineData: [SessionRoughnessData] = []
+
+    // Cheap scalar signature: changes when surface events are recomputed or routes change
+    private var sessionsSignature: Int {
+        sessions.reduce(0) { acc, s in
+            acc &+ s.surfaceEventCount &+ Int(s.totalDistanceM)
         }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            SurfaceMapRepresentable(clusters: clusters, sessions: showRoutes ? sessions : [])
+            SurfaceMapRepresentable(polylineData: polylineData)
 
-            controlPanel
+            legendPanel
+        }
+        .task(id: sessionsSignature) {
+            // Extract SwiftData objects on the main actor into plain Sendable types
+            let sources: [(lats: [Double], lons: [Double],
+                           eLats: [Double], eLons: [Double], eGs: [Double])] = sessions.map { s in
+                let lats  = s.routeLatitudes
+                let lons  = s.routeLongitudes
+                let evts  = s.peakEventsRestored.filter { $0.type == .surface }
+                let eLats = evts.map { $0.coordinate.latitude }
+                let eLons = evts.map { $0.coordinate.longitude }
+                let eGs   = evts.map { Double($0.formatted.components(separatedBy: " ").first ?? "0") ?? 0 }
+                return (lats, lons, eLats, eLons, eGs)
+            }
+
+            // Heavy computation on a background thread
+            let built: [SessionRoughnessData] = await Task.detached(priority: .userInitiated) {
+                let searchDeg = 80.0 / 111_000.0  // ~80 m search radius in degrees
+                return sources.compactMap { src -> SessionRoughnessData? in
+                    guard src.lats.count >= 2, src.lats.count == src.lons.count else { return nil }
+                    let step = max(1, src.lats.count / 250)
+                    var coords   = [CLLocationCoordinate2D]()
+                    var roughness = [Float]()
+                    for i in stride(from: 0, to: src.lats.count, by: step) {
+                        let lat = src.lats[i], lon = src.lons[i]
+                        coords.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                        // Find the worst surface event within the search radius
+                        var maxG = 0.0
+                        for j in 0..<src.eLats.count {
+                            let dlat = lat - src.eLats[j]
+                            let dlon = lon - src.eLons[j]
+                            if abs(dlat) < searchDeg && abs(dlon) < searchDeg {
+                                maxG = max(maxG, src.eGs[j])
+                            }
+                        }
+                        roughness.append(Float(maxG))
+                    }
+                    return SessionRoughnessData(coords: coords, roughness: roughness)
+                }
+            }.value
+
+            polylineData = built
         }
     }
 
-    private var controlPanel: some View {
-        VStack(spacing: 10) {
-            Toggle(isOn: $showRoutes) {
-                Label("Show drive routes", systemImage: "arrow.triangle.turn.up.right.circle")
-                    .font(.subheadline)
-            }
-            .toggleStyle(.switch)
-            .tint(.accentColor)
+    // MARK: - Legend
 
-            gForceLegend
+    private var legendPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Road Roughness")
+                .font(.caption2).fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                legendSwatch(.systemBlue,   "Smooth / no data")
+                legendSwatch(.systemYellow, "Mild")
+                legendSwatch(.systemOrange, "Moderate")
+                legendSwatch(.systemRed,    "Severe")
+            }
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.bottom, 20)
     }
 
-    private var gForceLegend: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Severity (g-force)")
-                .font(.caption2)
+    private func legendSwatch(_ color: UIColor, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Capsule()
+                .fill(Color(color))
+                .frame(width: 18, height: 5)
+            Text(label)
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Text("mild")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                LinearGradient(
-                    colors: [.green, .yellow, .orange, .red],
-                    startPoint: .leading, endPoint: .trailing
-                )
-                .frame(height: 6)
-                .clipShape(Capsule())
-                Text("severe")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
         }
     }
 }
@@ -99,8 +111,7 @@ struct SurfaceMapView: View {
 // MARK: - UIViewRepresentable
 
 private struct SurfaceMapRepresentable: UIViewRepresentable {
-    let clusters: [SurfaceCluster]
-    let sessions: [DriveSession]
+    let polylineData: [SessionRoughnessData]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -112,84 +123,80 @@ private struct SurfaceMapRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        context.coordinator.update(map: map, clusters: clusters, sessions: sessions)
+        context.coordinator.update(map: map, polylineData: polylineData)
     }
 
     // MARK: - Coordinator
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        private var renderedClusterCount = -1
-        private var renderedSessionCount = -1
-        private var circleColors: [ObjectIdentifier: Double] = [:]
+        private var lastCount = -1
+        // polyline object ID → roughness array for that polyline
+        private var roughnessForPolyline: [ObjectIdentifier: [Float]] = [:]
 
-        func update(map: MKMapView, clusters: [SurfaceCluster], sessions: [DriveSession]) {
-            guard clusters.count != renderedClusterCount || sessions.count != renderedSessionCount else { return }
-            renderedClusterCount = clusters.count
-            renderedSessionCount = sessions.count
+        func update(map: MKMapView, polylineData: [SessionRoughnessData]) {
+            guard polylineData.count != lastCount else { return }
+            lastCount = polylineData.count
 
             map.removeOverlays(map.overlays)
-            circleColors.removeAll()
+            roughnessForPolyline.removeAll()
 
-            // Add route polylines underneath surface circles
-            for session in sessions {
-                let pts = session.routePoints
-                guard pts.count >= 2 else { continue }
-                let step = max(1, pts.count / 200)
-                let coords = Swift.stride(from: 0, to: pts.count, by: step).map { pts[$0].coordinate }
-                let polyline = MKPolyline(coordinates: coords, count: coords.count)
-                map.addOverlay(polyline, level: .aboveRoads)
-            }
-
-            // Add surface event circles on top
             var unionRect = MKMapRect.null
-            for cluster in clusters {
-                let radius = max(20.0, min(60.0, Double(cluster.count) * 8 + 12))
-                let circle = MKCircle(center: cluster.coordinate, radius: radius)
-                circleColors[ObjectIdentifier(circle)] = cluster.maxGForce
-                map.addOverlay(circle, level: .aboveLabels)
-                unionRect = unionRect.union(circle.boundingMapRect)
+            for data in polylineData {
+                guard data.coords.count >= 2 else { continue }
+                let poly = MKPolyline(coordinates: data.coords, count: data.coords.count)
+                roughnessForPolyline[ObjectIdentifier(poly)] = data.roughness
+                map.addOverlay(poly, level: .aboveRoads)
+                unionRect = unionRect.union(poly.boundingMapRect)
             }
 
             guard !unionRect.isNull else { return }
             map.setVisibleMapRect(
                 unionRect,
-                edgePadding: UIEdgeInsets(top: 60, left: 24, bottom: 220, right: 24),
+                edgePadding: UIEdgeInsets(top: 60, left: 24, bottom: 200, right: 24),
                 animated: false
             )
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            if let circle = overlay as? MKCircle {
-                let renderer = MKCircleRenderer(circle: circle)
-                let g = circleColors[ObjectIdentifier(circle)] ?? 0.4
-                let col = severityColor(g)
-                renderer.fillColor   = col.withAlphaComponent(0.5)
-                renderer.strokeColor = col.withAlphaComponent(0.9)
-                renderer.lineWidth   = 1.5
-                return renderer
+            guard let polyline = overlay as? MKPolyline else {
+                return MKOverlayRenderer(overlay: overlay)
             }
-            if let polyline = overlay as? MKPolyline {
-                let renderer = MKPolylineRenderer(polyline: polyline)
-                renderer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.35)
-                renderer.lineWidth   = 3
-                renderer.lineCap     = .round
-                return renderer
+
+            let roughness = roughnessForPolyline[ObjectIdentifier(polyline)] ?? []
+            let hasEvents = roughness.contains { $0 > 0.01 }
+
+            guard hasEvents else {
+                // Pure smooth route: single flat colour is much cheaper to render than gradient
+                let r = MKPolylineRenderer(polyline: polyline)
+                r.strokeColor = UIColor.systemBlue.withAlphaComponent(0.45)
+                r.lineWidth   = 4
+                r.lineCap     = .round
+                return r
             }
-            return MKOverlayRenderer(overlay: overlay)
+
+            let renderer = MKGradientPolylineRenderer(polyline: polyline)
+            renderer.lineWidth  = 5
+            renderer.lineCap    = .round
+            renderer.lineJoin   = .round
+
+            var colors    = [UIColor]()
+            var locations = [CGFloat]()
+            for i in 0..<polyline.pointCount {
+                locations.append(CGFloat(polyline.location(atPointIndex: i)))
+                let g = i < roughness.count ? Double(roughness[i]) : 0
+                colors.append(roughnessColor(g))
+            }
+            renderer.setColors(colors, locations: locations)
+            return renderer
         }
 
-        // Green (mild ~0.4 g) → yellow → orange → red (severe 0.8+ g)
-        private func severityColor(_ g: Double) -> UIColor {
-            let t = CGFloat(max(0, min(1, (g - 0.4) / 0.6)))
-            let hue: CGFloat
-            if t < 0.33 {
-                hue = 120.0/360.0 - t / 0.33 * 60.0/360.0
-            } else if t < 0.66 {
-                hue = 60.0/360.0 - (t - 0.33) / 0.33 * 30.0/360.0
-            } else {
-                hue = 30.0/360.0 - (t - 0.66) / 0.34 * 30.0/360.0
-            }
-            return UIColor(hue: max(0, hue), saturation: 1, brightness: 0.85, alpha: 1)
+        // No event / smooth → blue; mild → yellow; moderate → orange; severe → red
+        private func roughnessColor(_ g: Double) -> UIColor {
+            if g < 0.05  { return UIColor.systemBlue.withAlphaComponent(0.45) }
+            if g < 0.40  { return UIColor.systemGreen.withAlphaComponent(0.85) }
+            if g < 0.55  { return UIColor.systemYellow.withAlphaComponent(0.90) }
+            if g < 0.70  { return UIColor.systemOrange.withAlphaComponent(0.90) }
+            return          UIColor.systemRed.withAlphaComponent(0.90)
         }
     }
 }

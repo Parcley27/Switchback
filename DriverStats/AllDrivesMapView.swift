@@ -8,7 +8,64 @@
 import MapKit
 import SwiftUI
 
-struct AllDrivesMapView: UIViewRepresentable {
+// MARK: - All-drives map with legend
+
+struct AllDrivesMapView: View {
+    let sessions: [DriveSession]
+
+    // Unique drive modes present in the session list (excluding normal — shown via score)
+    private var presentModes: [DriveMode] {
+        let modes = Set(sessions.map(\.driveMode)).subtracting([.normal])
+        return DriveMode.allCases.filter { modes.contains($0) }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            AllDrivesMapRepresentable(sessions: sessions)
+
+            // Legend card
+            VStack(alignment: .leading, spacing: 8) {
+                // Score gradient
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Smoothness Score")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        Text("0").font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                        LinearGradient(colors: [.red, .orange, .yellow, .green],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .frame(height: 6).clipShape(Capsule())
+                        Text("100").font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                    }
+                }
+
+                // Mode swatches (only shown when non-normal drives are present)
+                if !presentModes.isEmpty {
+                    Divider()
+                    HStack(spacing: 10) {
+                        ForEach(presentModes, id: \.self) { mode in
+                            HStack(spacing: 4) {
+                                Capsule()
+                                    .fill(mode.color)
+                                    .frame(width: 16, height: 5)
+                                Text(mode.label)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 14)
+        }
+    }
+}
+
+// MARK: - Underlying UIViewRepresentable
+
+private struct AllDrivesMapRepresentable: UIViewRepresentable {
     let sessions: [DriveSession]
 
     func makeCoordinator() -> Coordinator { Coordinator() }
