@@ -4,6 +4,7 @@
 //
 
 import CoreLocation
+import CryptoKit
 import MapKit
 import SwiftUI
 
@@ -58,7 +59,9 @@ final class RouteSnapshotCache {
     }
 
     private func diskURL(for key: String) -> URL? {
-        diskDir?.appendingPathComponent("\(abs(key.hashValue)).png")
+        let hash = SHA256.hash(data: Data(key.utf8))
+        let hex = hash.compactMap { String(format: "%02x", $0) }.joined()
+        return diskDir?.appendingPathComponent("\(hex).png")
     }
 }
 
