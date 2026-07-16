@@ -19,6 +19,8 @@ struct TripView: View {
     @State private var fillingGap: ObjectIdentifier? = nil
     @State private var gapFillError: String? = nil
 
+    @AppStorage("ds.geoLabels") private var geoLabels: Bool = true
+
     private let gapThresholdMeters: Double = 500
 
     private var ordered: [DriveSession] { trip.orderedSessions }
@@ -181,8 +183,41 @@ struct TripView: View {
             modelContext.insert(connector)
             connector.trip = trip
             try? modelContext.save()
+            if geoLabels {
+                await geocodeConnector(connector, start: startCoord, end: endCoord)
+                try? modelContext.save()
+            }
         } catch {
             gapFillError = "Couldn't get directions: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Geocoding for connecting drives
+
+    @MainActor
+    private func geocodeConnector(_ session: DriveSession,
+                                  start: CLLocationCoordinate2D,
+                                  end: CLLocationCoordinate2D) async {
+        let namedLocs = (try? modelContext.fetch(FetchDescriptor<NamedLocation>())) ?? []
+        if let named = namedLocs.filter({ $0.contains(start) }).min(by: { $0.radius < $1.radius })?.name {
+            session.startPlaceName = named
+        } else {
+            session.startPlaceName = await reverseGeocode(start)
+        }
+        if let named = namedLocs.filter({ $0.contains(end) }).min(by: { $0.radius < $1.radius })?.name {
+            session.endPlaceName = named
+        } else {
+            session.endPlaceName = await reverseGeocode(end)
+        }
+    }
+
+    private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) async -> String? {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
+        return await withCheckedContinuation { continuation in
+            request.getMapItems { items, _ in
+                continuation.resume(returning: items?.first?.addressRepresentations?.cityName)
+            }
         }
     }
 }

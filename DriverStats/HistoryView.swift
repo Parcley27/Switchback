@@ -36,12 +36,14 @@ struct HistoryView: View {
     @Query(sort: \DriveSession.startDate, order: .reverse) private var sessions: [DriveSession]
     @Query(sort: \Trip.createdDate, order: .reverse) private var trips: [Trip]
     @Environment(\.modelContext) private var modelContext
-    @State private var showingAllDrivesMap = false
-    @State private var showingSurfaceMap = false
+    @State private var showingMapsView = false
     @State private var editMode: EditMode = .inactive
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var showMergeConfirmation = false
     @State private var pendingNewTrip: Trip? = nil
+    @State private var showingTripNamePrompt = false
+    @State private var pendingTripName = ""
+    @State private var quickTripSession: DriveSession? = nil
 
     // Search & filter
     @State private var searchText: String = ""
@@ -67,23 +69,22 @@ struct HistoryView: View {
             customStartDate: $customStartDate,
             customEndDate: $customEndDate,
             editMode: $editMode,
-            selection: $selection
+            selection: $selection,
+            onNewTripFromSession: { session in
+                quickTripSession = session
+                pendingTripName = ""
+                showingTripNamePrompt = true
+            }
         )
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("History")
         .searchable(text: $searchText, prompt: "Search drives…")
         .toolbar {
-            ToolbarItemGroup(placement: .navigationBarLeading) {
+            ToolbarItem(placement: .navigationBarLeading) {
                 Button {
-                    showingAllDrivesMap = true
+                    showingMapsView = true
                 } label: {
                     Image(systemName: "map")
-                }
-                .disabled(sessions.isEmpty)
-                Button {
-                    showingSurfaceMap = true
-                } label: {
-                    Image(systemName: "car.rear.and.collision.road.lane")
                 }
                 .disabled(sessions.isEmpty)
             }
@@ -96,7 +97,8 @@ struct HistoryView: View {
                     }
                     if selection.count >= 2 {
                         Button("Trip") {
-                            performCreateTrip()
+                            pendingTripName = ""
+                            showingTripNamePrompt = true
                         }
                     }
                 }
@@ -119,6 +121,11 @@ struct HistoryView: View {
         } message: {
             Text("The gap between these drives will count as stopping time. Both original sessions will be replaced by a single combined session.")
         }
+        .alert("Name This Trip", isPresented: $showingTripNamePrompt) {
+            TextField("e.g. Road Trip, Daily Commute", text: $pendingTripName)
+            Button("Create") { performCreateTrip() }
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(item: $pendingNewTrip) { trip in
             NavigationStack {
                 TripView(trip: trip)
@@ -139,30 +146,9 @@ struct HistoryView: View {
                 activeTimeFilter = nil
             }
         }
-        .fullScreenCover(isPresented: $showingAllDrivesMap) {
+        .fullScreenCover(isPresented: $showingMapsView) {
             NavigationStack {
-                AllDrivesMapView(sessions: sessions)
-                    .ignoresSafeArea(edges: .bottom)
-                    .navigationTitle("All Drives")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showingAllDrivesMap = false }
-                        }
-                    }
-            }
-        }
-        .fullScreenCover(isPresented: $showingSurfaceMap) {
-            NavigationStack {
-                SurfaceMapView(sessions: sessions)
-                    .ignoresSafeArea(edges: .bottom)
-                    .navigationTitle("Road Surface Map")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showingSurfaceMap = false }
-                        }
-                    }
+                HistoryMapsView(sessions: sessions)
             }
         }
         .task {
@@ -227,17 +213,21 @@ struct HistoryView: View {
     // MARK: - Trip creation
 
     private func performCreateTrip() {
-        guard selection.count >= 2 else { return }
-        let picked = sessions.filter { selection.contains($0.persistentModelID) }
-        guard picked.count >= 2 else { return }
-        let trip = Trip()
+        let trimmed = pendingTripName.trimmingCharacters(in: .whitespaces)
+        let trip = Trip(name: trimmed.isEmpty ? "Trip" : trimmed)
         modelContext.insert(trip)
-        for session in picked {
-            session.trip = trip
+        if let single = quickTripSession {
+            single.trip = trip
+            quickTripSession = nil
+        } else {
+            guard selection.count >= 2 else { return }
+            let picked = sessions.filter { selection.contains($0.persistentModelID) }
+            guard picked.count >= 2 else { return }
+            for session in picked { session.trip = trip }
+            selection.removeAll()
+            withAnimation { editMode = .inactive }
         }
         try? modelContext.save()
-        selection.removeAll()
-        withAnimation { editMode = .inactive }
         pendingNewTrip = trip
     }
 }
@@ -256,6 +246,7 @@ private struct HistoryListContent: View {
     @Binding var customEndDate: Date
     @Binding var editMode: EditMode
     @Binding var selection: Set<PersistentIdentifier>
+    var onNewTripFromSession: (DriveSession) -> Void = { _ in }
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.isSearching) private var isSearching
@@ -401,12 +392,19 @@ private struct HistoryListContent: View {
                                         Label("Remove from \"\(existingTrip.name)\"",
                                               systemImage: "minus.circle")
                                     }
-                                } else if !trips.isEmpty {
-                                    Menu("Add to Trip") {
-                                        ForEach(trips) { trip in
-                                            Button(trip.name) {
-                                                session.trip = trip
-                                                try? modelContext.save()
+                                } else {
+                                    Button {
+                                        onNewTripFromSession(session)
+                                    } label: {
+                                        Label("New Trip…", systemImage: "plus.circle")
+                                    }
+                                    if !trips.isEmpty {
+                                        Menu("Add to Trip") {
+                                            ForEach(trips) { trip in
+                                                Button(trip.name) {
+                                                    session.trip = trip
+                                                    try? modelContext.save()
+                                                }
                                             }
                                         }
                                     }
@@ -443,7 +441,7 @@ private struct HistoryListContent: View {
 // MARK: - Aggregate stats header
 // Equatable so SwiftUI can skip re-evaluation when sessions haven't changed.
 // Typing in the search bar, toggling filters, or changing edit selection do NOT
-// alter the sessions array, so the six O(n) scans and the trend chart are bypassed.
+// alter the sessions array, so the aggregate scans and trend chart are bypassed.
 
 private struct HistoryStatsHeader: View, Equatable {
     let sessions: [DriveSession]
@@ -451,6 +449,23 @@ private struct HistoryStatsHeader: View, Equatable {
     static func == (lhs: HistoryStatsHeader, rhs: HistoryStatsHeader) -> Bool {
         guard lhs.sessions.count == rhs.sessions.count else { return false }
         return zip(lhs.sessions, rhs.sessions).allSatisfy { $0 === $1 }
+    }
+
+    // MARK: Cache
+
+    private var statsKey: String { StatsCache.key(for: sessions) }
+
+    private var stats: CachedStats {
+        if let cached = StatsCache.shared.load(key: statsKey) { return cached }
+        let built = CachedStats.build(from: sessions)
+        StatsCache.shared.save(built, key: statsKey)
+        return built
+    }
+
+    // Computed live — time-relative, stale if cached across day boundaries
+    private var thisWeekKm: Double {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        return sessions.filter { $0.startDate > cutoff }.reduce(0) { $0 + $1.totalDistanceM } / 1000
     }
 
     var body: some View {
@@ -471,10 +486,10 @@ private struct HistoryStatsHeader: View, Equatable {
                 spacing: 10
             ) {
                 StatCell(label: "Avg score",
-                         value: String(format: "%.0f", avgScore),
+                         value: String(format: "%.0f", stats.avgScore),
                          accent: true)
                 StatCell(label: "Best peak",
-                         value: String(format: "%.2f", bestPeakG),
+                         value: String(format: "%.2f", stats.bestPeakNet),
                          unit: "g")
                 StatCell(label: "All drives",
                          value: "\(sessions.count)")
@@ -482,18 +497,18 @@ private struct HistoryStatsHeader: View, Equatable {
                          value: String(format: "%.0f", thisWeekKm),
                          unit: "km")
                 StatCell(label: "Total dist",
-                         value: String(format: "%.0f", totalKm),
+                         value: String(format: "%.0f", stats.totalDistanceM / 1000),
                          unit: "km")
                 StatCell(label: "Total time",
-                         value: formatTotalDrivingTime(totalDuration))
+                         value: formatTotalDrivingTime(stats.totalDurationSeconds))
             }
 
-            if trendScores.count >= 3 {
+            if stats.trendScores.count >= 3 {
                 CardSection("Smoothness trend",
-                            note: "last \(trendScores.count)",
+                            note: "last \(stats.trendScores.count)",
                             innerPadding: 12) {
                     Chart {
-                        ForEach(Array(trendScores.enumerated()), id: \.offset) { i, score in
+                        ForEach(Array(stats.trendScores.enumerated()), id: \.offset) { i, score in
                             AreaMark(x: .value("Drive", i + 1), y: .value("Score", score))
                                 .foregroundStyle(Color.accentColor.opacity(0.12))
                             LineMark(x: .value("Drive", i + 1), y: .value("Score", score))
@@ -509,7 +524,7 @@ private struct HistoryStatsHeader: View, Equatable {
                         }
                     }
                     .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: min(trendScores.count, 6))) {
+                        AxisMarks(values: .automatic(desiredCount: min(stats.trendScores.count, 6))) {
                             AxisGridLine()
                             AxisValueLabel()
                         }
@@ -520,22 +535,6 @@ private struct HistoryStatsHeader: View, Equatable {
         }
     }
 
-    // MARK: Aggregates (only run when sessions actually changes)
-
-    private var totalKm: Double {
-        sessions.reduce(0) { $0 + $1.totalDistanceM } / 1000
-    }
-
-    private var thisWeekKm: Double {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-        return sessions.filter { $0.startDate > cutoff }.reduce(0) { $0 + $1.totalDistanceM } / 1000
-    }
-
-    private var avgScore: Double {
-        guard !sessions.isEmpty else { return 0 }
-        return sessions.reduce(0) { $0 + $1.smoothnessScore } / Double(sessions.count)
-    }
-
     private func formatTotalDrivingTime(_ seconds: Double) -> String {
         let totalMin = Int(seconds) / 60
         let days  = totalMin / (24 * 60)
@@ -544,18 +543,6 @@ private struct HistoryStatsHeader: View, Equatable {
         if days > 0  { return "\(days)d \(hours)h" }
         if hours > 0 { return "\(hours)h \(mins)m" }
         return "\(mins)m"
-    }
-
-    private var bestPeakG: Double {
-        sessions.map { $0.peakNetAccel }.max() ?? 0
-    }
-
-    private var totalDuration: Double {
-        sessions.reduce(0) { $0 + $1.durationSeconds }
-    }
-
-    private var trendScores: [Int] {
-        Array(sessions.prefix(12).reversed().map { Int($0.smoothnessScore) })
     }
 }
 
@@ -760,5 +747,45 @@ private struct SessionCardView: View {
         .padding(12)
         .background(Color(.secondarySystemGroupedBackground),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Combined map view (All Drives / Road Surface toggle)
+
+private struct HistoryMapsView: View {
+    let sessions: [DriveSession]
+    @Environment(\.dismiss) private var dismiss
+
+    enum MapMode: String, CaseIterable {
+        case drives  = "Drives"
+        case surface = "Surface"
+    }
+
+    @State private var mode: MapMode = .drives
+
+    var body: some View {
+        Group {
+            if mode == .drives {
+                AllDrivesMapView(sessions: sessions)
+            } else {
+                SurfaceMapView(sessions: sessions)
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Map mode", selection: $mode) {
+                    ForEach(MapMode.allCases, id: \.self) { m in
+                        Text(m.rawValue).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") { dismiss() }
+            }
+        }
     }
 }

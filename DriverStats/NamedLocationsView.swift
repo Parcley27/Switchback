@@ -89,30 +89,13 @@ struct NamedLocationsView: View {
                     Image(systemName: "plus")
                 }
             }
-            ToolbarItem(placement: .navigationBarLeading) {
-                if geocodeProgress != nil {
-                    // hide edit button while geocoding to avoid conflicting states
-                    EmptyView()
-                } else {
-                    Menu {
-                        if !locations.isEmpty {
-                            // This is handled by the List's EditButton placement inline
-                        }
-                        Button {
-                            showingRefreshOptions = true
-                        } label: {
-                            Label("Refresh Place Names…", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(geocodeProgress != nil)
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showingRefreshOptions = true
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
-            }
-            if !locations.isEmpty && geocodeProgress == nil {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
-                }
+                .disabled(geocodeProgress != nil)
             }
         }
         .confirmationDialog("Refresh Place Names", isPresented: $showingRefreshOptions) {
@@ -277,8 +260,10 @@ struct NamedLocationFormView: View {
     @Environment(\.modelContext) private var modelContext
 
     let existing: NamedLocation?
+    var initialCoordinate: CLLocationCoordinate2D? = nil
 
     @State private var name: String = ""
+    @State private var allRoutes: [[CLLocationCoordinate2D]] = []
     @State private var radius: Double = 200
     @State private var radiusText: String = "200"
     @State private var cameraPosition: MapCameraPosition = .automatic
@@ -295,6 +280,10 @@ struct NamedLocationFormView: View {
                 Section {
                     ZStack(alignment: .center) {
                         Map(position: $cameraPosition) {
+                            ForEach(0..<allRoutes.count, id: \.self) { i in
+                                MapPolyline(coordinates: allRoutes[i])
+                                    .stroke(Color.secondary.opacity(0.4), lineWidth: 1.5)
+                            }
                             if hasCoordinate {
                                 MapCircle(center: coordinate, radius: radius)
                                     .foregroundStyle(Color.accentColor.opacity(0.15))
@@ -377,6 +366,7 @@ struct NamedLocationFormView: View {
             }
             .task {
                 setupInitialState()
+                loadAllRoutes()
             }
         }
     }
@@ -400,7 +390,7 @@ struct NamedLocationFormView: View {
                 latitudinalMeters: max(loc.radius * 8, 800),
                 longitudinalMeters: max(loc.radius * 8, 800)
             ))
-        } else if let coord = CLLocationManager().location?.coordinate {
+        } else if let coord = initialCoordinate ?? CLLocationManager().location?.coordinate {
             coordinate = coord
             hasCoordinate = true
             cameraPosition = .region(MKCoordinateRegion(
@@ -408,6 +398,22 @@ struct NamedLocationFormView: View {
                 latitudinalMeters: 800,
                 longitudinalMeters: 800
             ))
+        }
+    }
+
+    private func loadAllRoutes() {
+        let descriptor = FetchDescriptor<DriveSession>(
+            sortBy: [SortDescriptor(\DriveSession.startDate, order: .reverse)]
+        )
+        let sessions = (try? modelContext.fetch(descriptor)) ?? []
+        allRoutes = sessions.prefix(100).compactMap { session in
+            let lats = session.routeLatitudes
+            let lons = session.routeLongitudes
+            guard lats.count == lons.count, lats.count >= 2 else { return nil }
+            let step = max(1, lats.count / 50)
+            return stride(from: 0, to: lats.count, by: step).map {
+                CLLocationCoordinate2D(latitude: lats[$0], longitude: lons[$0])
+            }
         }
     }
 

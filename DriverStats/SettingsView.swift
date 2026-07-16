@@ -24,7 +24,10 @@ struct SettingsView: View {
 
     @State private var needsRecompute = false
     @State private var showEraseConfirmation = false
+    @State private var showClearThumbnailConfirmation = false
+    @State private var showClearStatsConfirmation = false
     @State private var thumbnailCacheSize: Int = 0
+    @State private var statsCacheSize: Int = 0
 
     var body: some View {
         List {
@@ -263,14 +266,16 @@ struct SettingsView: View {
             // MARK: Storage
             Section("Storage") {
                 Button {
-                    RouteSnapshotCache.shared.clearAll()
-                    thumbnailCacheSize = 0
+                    showClearThumbnailConfirmation = true
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Clear Thumbnail Cache")
                             if thumbnailCacheSize > 0 {
                                 Text(thumbnailCacheSize.formattedBytes)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Map preview images for all drives")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -279,8 +284,31 @@ struct SettingsView: View {
                     }
                 }
                 .foregroundStyle(Color(.label))
+
+                Button {
+                    showClearStatsConfirmation = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Clear Stats Cache")
+                            if statsCacheSize > 0 {
+                                Text(statsCacheSize.formattedBytes)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Precomputed aggregate statistics")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "chart.bar")
+                    }
+                }
+                .foregroundStyle(Color(.label))
             }
-            .onAppear { thumbnailCacheSize = RouteSnapshotCache.shared.diskSizeBytes }
+            .onAppear {
+                thumbnailCacheSize = RouteSnapshotCache.shared.diskSizeBytes
+                statsCacheSize = StatsCache.shared.diskSizeBytes
+            }
 
             // MARK: Danger Zone
             Section("Danger Zone") {
@@ -334,6 +362,24 @@ struct SettingsView: View {
         } message: {
             Text("This permanently deletes all recorded sessions. This cannot be undone.")
         }
+        .alert("Clear Thumbnail Cache?", isPresented: $showClearThumbnailConfirmation) {
+            Button("Clear", role: .destructive) {
+                RouteSnapshotCache.shared.clearAll()
+                thumbnailCacheSize = 0
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Map preview images will be regenerated the next time you view your drives.")
+        }
+        .alert("Clear Stats Cache?", isPresented: $showClearStatsConfirmation) {
+            Button("Clear", role: .destructive) {
+                StatsCache.shared.clear()
+                statsCacheSize = 0
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Aggregate statistics will be recomputed the next time you open your drive history.")
+        }
     }
 
     private func recomputeAllSessions() {
@@ -349,6 +395,7 @@ struct SettingsView: View {
             )
             session.recomputeSurfaceEvents(threshold: motion.surfaceThresholdG)
         }
+        StatsCache.shared.clear()
         try? modelContext.save()
     }
 
@@ -356,6 +403,8 @@ struct SettingsView: View {
         let descriptor = FetchDescriptor<DriveSession>()
         guard let sessions = try? modelContext.fetch(descriptor) else { return }
         sessions.forEach { modelContext.delete($0) }
+        RouteSnapshotCache.shared.clearAll()
+        StatsCache.shared.clear()
         try? modelContext.save()
     }
 }

@@ -70,7 +70,8 @@ final class RouteSnapshotCache {
 func makeRouteThumbnail(
     polylines: [(coords: [CLLocationCoordinate2D], color: UIColor)],
     size: CGSize,
-    scale: CGFloat
+    scale: CGFloat,
+    colorScheme: ColorScheme = .light
 ) async -> UIImage? {
     let allCoords = polylines.flatMap(\.coords)
     guard allCoords.count >= 2 else { return nil }
@@ -99,6 +100,7 @@ func makeRouteThumbnail(
     opts.pointOfInterestFilter = .excludingAll
     opts.showsBuildings = false
     opts.region = region
+    opts.traitCollection = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
 
     guard let snapshot = try? await MKMapSnapshotter(options: opts).start() else { return nil }
 
@@ -133,13 +135,14 @@ struct RouteThumbnailView: View {
     var size: CGSize = CGSize(width: 76, height: 70)
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
     @State private var image: UIImage? = nil
 
     private var cacheKey: String {
-        // Scalar-only fields — no array materialization
         let t = Int(session.startDate.timeIntervalSinceReferenceDate)
         let d = Int(session.totalDistanceM)
-        return "\(t)-\(d)-\(session.driveModeRaw)-\(Int(size.width))x\(Int(size.height))"
+        let cs = colorScheme == .dark ? "dk" : "lt"
+        return "\(t)-\(d)-\(session.driveModeRaw)-\(Int(size.width))x\(Int(size.height))-\(cs)"
     }
 
     var body: some View {
@@ -170,9 +173,10 @@ struct RouteThumbnailView: View {
                 CLLocationCoordinate2D(latitude: lats[$0], longitude: lons[$0])
             }
             let scale = displayScale
+            let scheme = colorScheme
             let built = await makeRouteThumbnail(
                 polylines: [(coords, session.driveMode.uiColor)],
-                size: size, scale: scale)
+                size: size, scale: scale, colorScheme: scheme)
             if let built {
                 RouteSnapshotCache.shared.store(built, for: cacheKey)
                 image = built
@@ -189,14 +193,15 @@ struct TripThumbnailView: View {
     var size: CGSize = CGSize(width: 76, height: 70)
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
     @State private var image: UIImage? = nil
 
     private var cacheKey: String {
-        // Sorted so insertion order doesn't matter
         let sig = trip.sessions
             .map { "\(Int($0.startDate.timeIntervalSinceReferenceDate))" }
             .sorted().joined(separator: ",")
-        return "trip-[\(sig)]-\(Int(size.width))x\(Int(size.height))"
+        let cs = colorScheme == .dark ? "dk" : "lt"
+        return "trip-[\(sig)]-\(Int(size.width))x\(Int(size.height))-\(cs)"
     }
 
     var body: some View {
@@ -232,7 +237,8 @@ struct TripThumbnailView: View {
             }
             guard !polylines.isEmpty else { return }
             let scale = displayScale
-            let built = await makeRouteThumbnail(polylines: polylines, size: size, scale: scale)
+            let scheme = colorScheme
+            let built = await makeRouteThumbnail(polylines: polylines, size: size, scale: scale, colorScheme: scheme)
             if let built {
                 RouteSnapshotCache.shared.store(built, for: cacheKey)
                 image = built
