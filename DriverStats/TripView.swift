@@ -331,37 +331,59 @@ private struct GapConnectorRow: View {
 struct TripCardView: View {
     let trip: Trip
 
+    private var dateRangeLabel: String? {
+        guard let start = trip.startDate else { return nil }
+        guard let end = trip.endDate,
+              !Calendar.current.isDate(start, inSameDayAs: end) else {
+            return start.formatted(date: .abbreviated, time: .omitted)
+        }
+        return "\(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))"
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            TripThumbnailView(trip: trip)
-            .frame(width: 76, height: 70)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                TripThumbnailView(trip: trip)
+                    .frame(width: 88, height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(trip.name)
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .lineLimit(1)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(trip.name)
+                            .font(.system(size: 17, weight: .semibold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 8) {
-                    Text("\(trip.driveCount) drive\(trip.driveCount == 1 ? "" : "s")")
-                    Text(formatDistance(trip.totalDistanceM))
-                    Text(formatDuration(trip.totalDrivingSeconds))
+                        if let dateRange = dateRangeLabel {
+                            Text(dateRange)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if !trip.scoredSessions.isEmpty {
+                        ScoreRing(value: Int(trip.avgSmoothnessScore), size: 42)
+                    }
                 }
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-                if let start = trip.startDate {
-                    Text(start.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
-                }
+                .frame(maxWidth: .infinity)
             }
 
-            Spacer(minLength: 0)
+            Divider()
+                .padding(.top, 10)
+
+            HStack(spacing: 0) {
+                DriveStatPill(systemImage: "car.2", label: "\(trip.driveCount) drive\(trip.driveCount == 1 ? "" : "s")")
+                Spacer()
+                DriveStatPill(systemImage: "arrow.left.and.right", label: formatDistance(trip.totalDistanceM))
+                Spacer()
+                DriveStatPill(systemImage: "clock", label: formatDuration(trip.totalDrivingSeconds))
+            }
+            .padding(.top, 10)
         }
-        .padding(12)
+        .padding(14)
         .background(Color(.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

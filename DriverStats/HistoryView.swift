@@ -296,6 +296,74 @@ private struct HistoryListContent: View {
         useCustomRange = false
     }
 
+    private struct DriveGroup {
+        let header: String
+        let sessions: [DriveSession]
+    }
+
+    private var driveGroups: [DriveGroup] {
+        let cal = Calendar.current
+        let now = Date()
+        let weekCutoff = cal.date(byAdding: .day, value: -7, to: now) ?? now
+        let monthCutoff = cal.date(byAdding: .month, value: -1, to: now) ?? now
+        var today: [DriveSession] = []
+        var yesterday: [DriveSession] = []
+        var thisWeek: [DriveSession] = []
+        var thisMonth: [DriveSession] = []
+        var older: [DriveSession] = []
+        for session in filteredSessions {
+            if cal.isDateInToday(session.startDate)        { today.append(session) }
+            else if cal.isDateInYesterday(session.startDate) { yesterday.append(session) }
+            else if session.startDate >= weekCutoff          { thisWeek.append(session) }
+            else if session.startDate >= monthCutoff         { thisMonth.append(session) }
+            else                                             { older.append(session) }
+        }
+        var groups: [DriveGroup] = []
+        if !today.isEmpty     { groups.append(DriveGroup(header: "Today",      sessions: today)) }
+        if !yesterday.isEmpty { groups.append(DriveGroup(header: "Yesterday",  sessions: yesterday)) }
+        if !thisWeek.isEmpty  { groups.append(DriveGroup(header: "This Week",  sessions: thisWeek)) }
+        if !thisMonth.isEmpty { groups.append(DriveGroup(header: "This Month", sessions: thisMonth)) }
+        if !older.isEmpty     { groups.append(DriveGroup(header: "Earlier",    sessions: older)) }
+        return groups
+    }
+
+    @ViewBuilder
+    private func driveRow(for session: DriveSession) -> some View {
+        NavigationLink(destination: DriveSessionView(session: session)) {
+            SessionCardView(session: session)
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+        .contextMenu {
+            if let existingTrip = session.trip {
+                Button(role: .destructive) {
+                    session.trip = nil
+                    try? modelContext.save()
+                } label: {
+                    Label("Remove from \"\(existingTrip.name)\"",
+                          systemImage: "minus.circle")
+                }
+            } else {
+                Button {
+                    onNewTripFromSession(session)
+                } label: {
+                    Label("New Trip…", systemImage: "plus.circle")
+                }
+                if !trips.isEmpty {
+                    Menu("Add to Trip") {
+                        ForEach(trips) { trip in
+                            Button(trip.name) {
+                                session.trip = trip
+                                try? modelContext.save()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         if sessions.isEmpty {
             ScrollView {
@@ -357,9 +425,9 @@ private struct HistoryListContent: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                 }
 
-                // Drive cards
-                Section {
-                    if filteredSessions.isEmpty {
+                // Drive cards — date-grouped when not filtering, flat when filtering
+                if filteredSessions.isEmpty && isFiltering {
+                    Section {
                         VStack(spacing: 14) {
                             ContentUnavailableView(
                                 "No results",
@@ -375,57 +443,53 @@ private struct HistoryListContent: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    } else {
+                    } header: {
+                        HStack(spacing: 5) {
+                            Text("Results")
+                                .font(.footnote).fontWeight(.medium)
+                                .textCase(.uppercase)
+                                .foregroundStyle(.secondary)
+                                .tracking(0.3)
+                            Text("(0)")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                } else if isFiltering {
+                    Section {
                         ForEach(filteredSessions) { session in
-                            NavigationLink(destination: DriveSessionView(session: session)) {
-                                SessionCardView(session: session)
-                            }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                            .contextMenu {
-                                if let existingTrip = session.trip {
-                                    Button(role: .destructive) {
-                                        session.trip = nil
-                                        try? modelContext.save()
-                                    } label: {
-                                        Label("Remove from \"\(existingTrip.name)\"",
-                                              systemImage: "minus.circle")
-                                    }
-                                } else {
-                                    Button {
-                                        onNewTripFromSession(session)
-                                    } label: {
-                                        Label("New Trip…", systemImage: "plus.circle")
-                                    }
-                                    if !trips.isEmpty {
-                                        Menu("Add to Trip") {
-                                            ForEach(trips) { trip in
-                                                Button(trip.name) {
-                                                    session.trip = trip
-                                                    try? modelContext.save()
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            driveRow(for: session)
                         }
                         .onDelete { indexSet in
                             indexSet.forEach { modelContext.delete(filteredSessions[$0]) }
                         }
-                    }
-                } header: {
-                    HStack(spacing: 5) {
-                        Text(isFiltering ? "Results" : "Recent Drives")
-                            .font(.footnote).fontWeight(.medium)
-                            .textCase(.uppercase)
-                            .foregroundStyle(.secondary)
-                            .tracking(0.3)
-                        if isFiltering {
+                    } header: {
+                        HStack(spacing: 5) {
+                            Text("Results")
+                                .font(.footnote).fontWeight(.medium)
+                                .textCase(.uppercase)
+                                .foregroundStyle(.secondary)
+                                .tracking(0.3)
                             Text("(\(filteredSessions.count))")
                                 .font(.footnote)
                                 .foregroundStyle(.tertiary)
+                        }
+                    }
+                } else {
+                    ForEach(driveGroups, id: \.header) { group in
+                        Section {
+                            ForEach(group.sessions) { session in
+                                driveRow(for: session)
+                            }
+                            .onDelete { indexSet in
+                                indexSet.forEach { modelContext.delete(group.sessions[$0]) }
+                            }
+                        } header: {
+                            Text(group.header)
+                                .font(.footnote).fontWeight(.medium)
+                                .textCase(.uppercase)
+                                .foregroundStyle(.secondary)
+                                .tracking(0.3)
                         }
                     }
                 }
@@ -468,6 +532,14 @@ private struct HistoryStatsHeader: View, Equatable {
         return sessions.filter { $0.startDate > cutoff }.reduce(0) { $0 + $1.totalDistanceM } / 1000
     }
 
+    // Normal drives from the last 7 days, chronological — drives not scored aren't in the trend
+    private var weeklyNormalTrend: [DriveSession] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        return sessions
+            .filter { $0.driveMode == .normal && $0.startDate >= cutoff }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             NavigationLink(destination: HistoryStatsView(sessions: sessions)) {
@@ -503,15 +575,15 @@ private struct HistoryStatsHeader: View, Equatable {
                          value: formatTotalDrivingTime(stats.totalDurationSeconds))
             }
 
-            if stats.trendScores.count >= 3 {
+            if weeklyNormalTrend.count >= 3 {
                 CardSection("Smoothness trend",
-                            note: "last \(stats.trendScores.count)",
+                            note: "last 7 days",
                             innerPadding: 12) {
                     Chart {
-                        ForEach(Array(stats.trendScores.enumerated()), id: \.offset) { i, score in
-                            AreaMark(x: .value("Drive", i + 1), y: .value("Score", score))
+                        ForEach(Array(weeklyNormalTrend.enumerated()), id: \.offset) { i, session in
+                            AreaMark(x: .value("Drive", i + 1), y: .value("Score", session.smoothnessScore))
                                 .foregroundStyle(Color.accentColor.opacity(0.12))
-                            LineMark(x: .value("Drive", i + 1), y: .value("Score", score))
+                            LineMark(x: .value("Drive", i + 1), y: .value("Score", session.smoothnessScore))
                                 .foregroundStyle(Color.accentColor)
                                 .lineStyle(StrokeStyle(lineWidth: 1.6))
                         }
@@ -524,7 +596,7 @@ private struct HistoryStatsHeader: View, Equatable {
                         }
                     }
                     .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: min(stats.trendScores.count, 6))) {
+                        AxisMarks(values: .automatic(desiredCount: min(weeklyNormalTrend.count, 8))) {
                             AxisGridLine()
                             AxisValueLabel()
                         }
@@ -665,7 +737,6 @@ private struct SessionCardView: View {
     @AppStorage("ds.showDrivingScore") private var showDrivingScore = true
     @AppStorage("ds.geoLabels") private var geoLabels = true
 
-    // Read the stored score — avoids re-deriving from raw arrays on every body eval
     private var score: Int { Int(session.smoothnessScore) }
 
     private var primaryLabel: String {
@@ -676,77 +747,84 @@ private struct SessionCardView: View {
     private var timeRange: String {
         let end = session.startDate.addingTimeInterval(session.durationSeconds)
         let fmt = Date.FormatStyle(date: .omitted, time: .shortened)
-        return "\(session.startDate.formatted(fmt)) → \(end.formatted(fmt))"
+        return "\(session.startDate.formatted(fmt)) – \(end.formatted(fmt))"
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            // RouteThumbnailView replaces the per-row live MKMapView:
-            // snapshot is built once, cached to memory+disk, and reused on scroll.
-            RouteThumbnailView(session: session)
-                .frame(width: 76, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                RouteThumbnailView(session: session)
+                    .frame(width: 88, height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 5) {
-                            Text(primaryLabel)
-                                .font(.system(size: 14.5, weight: .semibold))
-                                .lineLimit(1)
-                            if session.driveMode != .normal {
-                                Label(session.driveMode.label, systemImage: session.driveMode.sfSymbol)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(session.driveMode.color)
-                                    .labelStyle(.iconOnly)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(session.driveMode.color.opacity(0.12), in: Capsule())
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(primaryLabel)
+                            .font(.system(size: 17, weight: .semibold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+
                         if geoLabels && session.routeLabel != nil {
                             Text(session.startDate.formatted(date: .abbreviated, time: .omitted))
-                                .font(.system(size: 11.5))
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                         }
+
                         Text(timeRange)
-                            .font(.system(size: 11.5))
+                            .font(.system(size: 13))
                             .foregroundStyle(.tertiary)
                     }
-                    Spacer()
-                    if showDrivingScore && session.driveMode.receivesScore {
-                        ScoreRing(value: score, size: 34)
+
+                    Spacer(minLength: 8)
+
+                    if session.driveMode == .normal {
+                        if showDrivingScore {
+                            ScoreRing(value: score, size: 42)
+                        }
+                    } else {
+                        DriveModeCircle(mode: session.driveMode)
                     }
                 }
+                .frame(maxWidth: .infinity)
+            }
 
-                HStack(spacing: 12) {
-                    Text(formatDistance(session.totalDistanceM))
-                    Text(formatDuration(session.durationSeconds))
-                    if session.driveMode.receivesScore {
-                        Text("\(Int(session.maxSpeedMps * 3.6)) km/h")
-                            .foregroundStyle(Color.accentColor)
-                        Text(String(format: "%.2f g", session.peakNetAccel))
-                    }
-                }
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Divider()
+                .padding(.top, 10)
 
+            HStack(spacing: 0) {
+                DriveStatPill(systemImage: "arrow.left.and.right", label: formatDistance(session.totalDistanceM))
+                Spacer()
+                DriveStatPill(systemImage: "clock", label: formatDuration(session.durationSeconds))
                 if session.driveMode.receivesScore {
-                    let hardTotal = session.hardAccelCount + session.hardBrakingCount + session.hardCorneringCount
-                    Text("\(hardTotal) hard event\(hardTotal == 1 ? "" : "s") logged")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text("Route only — no score")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    DriveStatPill(systemImage: "speedometer", label: "\(Int(session.maxSpeedMps * 3.6)) km/h")
                 }
             }
+            .padding(.top, 10)
         }
-        .padding(12)
+        .padding(14)
         .background(Color(.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: - Drive mode circle (replaces score ring for non-normal drives)
+
+private struct DriveModeCircle: View {
+    let mode: DriveMode
+    var size: CGFloat = 42
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemFill), lineWidth: 4.5)
+            Circle()
+                .stroke(mode.color, style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
+            Image(systemName: mode.sfSymbol)
+                .font(.system(size: size * 0.34, weight: .semibold))
+                .foregroundStyle(mode.color)
+        }
+        .frame(width: size, height: size)
     }
 }
 

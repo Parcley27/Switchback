@@ -598,3 +598,22 @@ struct StatusLamp: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
+
+// MARK: - DriveStatPill
+
+/// Icon + value label used in drive/trip history cards.
+struct DriveStatPill: View {
+    let systemImage: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Text(label)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
