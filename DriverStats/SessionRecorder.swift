@@ -3,6 +3,8 @@
 //  DriverStats
 //
 
+import Combine
+import CoreLocation
 import Foundation
 import SwiftData
 
@@ -84,8 +86,12 @@ final class SessionRecorder: ObservableObject {
         let smoothWindow = (ud.object(forKey: "ds.autoSmoothWindow") as? Double) ?? 0.5
         let suppressVertical = (ud.object(forKey: "ds.suppressVertical") as? Bool) ?? true
 
-        let descriptor = FetchDescriptor<DriveSession>(predicate: #Predicate { $0.isDraft })
-        guard let orphans = try? context.fetch(descriptor), !orphans.isEmpty else { return }
+        // Fetch all sessions and filter in Swift to avoid SwiftData predicate issues
+        // on the isDraft column immediately after lightweight schema migration.
+        let descriptor = FetchDescriptor<DriveSession>()
+        guard let all = try? context.fetch(descriptor) else { return }
+        let orphans = all.filter { $0.isDraft }
+        guard !orphans.isEmpty else { return }
         for orphan in orphans {
             orphan.recompute(
                 hardThreshold: hardThreshold,

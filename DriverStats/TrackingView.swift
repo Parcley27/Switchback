@@ -16,6 +16,7 @@ struct TrackingView: View {
     @AppStorage("ds.keepScreenOn") private var keepScreenOn: Bool = false
     @AppStorage("ds.feltDirection") private var feltDirection: Bool = false
     @State private var sessionResult: SessionResult? = nil
+    @EnvironmentObject private var recorder: SessionRecorder
 
     private var stats: SessionStats? { motion.sessionStats }
 
@@ -332,6 +333,7 @@ struct TrackingView: View {
     // MARK: - Stop
 
     private func stopSession() {
+        recorder.cancelTimer()
         motion.endSession()
         location.stopTrack()
         guard let stats = motion.sessionStats else { return }

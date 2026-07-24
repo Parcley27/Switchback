@@ -82,6 +82,7 @@ class LocationManager: NSObject, ObservableObject {
         hasExitedLapZone = false
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
+        manager.showsBackgroundLocationIndicator = true
     }
 
     func stopTrack() {

@@ -111,7 +111,20 @@ final class DriveSession {
     // MARK: Trip membership
     var trip: Trip?
 
+    // MARK: Draft flag — true while a recording is in progress; cleared on finalize/recovery
+    var isDraft: Bool = false
+
+    // Empty init used by SessionRecorder to create a placeholder draft at recording start.
+    // All stored properties initialize to their declared defaults.
+    init() {}
+
     init(result: SessionResult) {
+        apply(result: result)
+    }
+
+    // Overwrites all stored fields from a SessionResult. Used both by init(result:) and by
+    // SessionRecorder.finalize to update a live draft without reinserting a new row.
+    func apply(result: SessionResult) {
         let s = result.stats
         startDate = s.startDate
         durationSeconds = s.durationSeconds

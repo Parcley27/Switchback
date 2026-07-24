@@ -12,7 +12,9 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var motion = MotionManager()
     @StateObject private var location = LocationManager()
+    @StateObject private var recorder = SessionRecorder()
     @State private var isTracking = false
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         TabView {
@@ -45,8 +47,10 @@ struct ContentView: View {
             }
         }
         .tint(.accentColor)
+        .environmentObject(recorder)
         .onAppear {
             location.requestPermissionAndStart()
+            recorder.recoverDrafts(context: modelContext)
         }
         .onChange(of: location.lastUpdate) { _, _ in
             motion.updateFromGPS(

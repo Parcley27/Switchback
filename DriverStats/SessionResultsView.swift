@@ -30,6 +30,8 @@ struct SessionResult: Identifiable {
 struct SessionResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.displayScale) private var displayScale
+    @EnvironmentObject private var recorder: SessionRecorder
     let result: SessionResult
 
     @State private var didSave = false
@@ -55,14 +57,16 @@ struct SessionResultsView: View {
             .onAppear {
                 guard !didSave else { return }
                 didSave = true
-                let session = DriveSession(result: result)
-                modelContext.insert(session)
+                let session = recorder.finalize(result: result, context: modelContext)
                 guard let first = result.track.first, let last = result.track.last,
                       result.track.count >= 2 else { return }
                 let startCoord = first.coordinate
                 let endCoord = last.coordinate
+                let scale = displayScale
                 Task {
                     await geocodePlaceNames(session: session, start: startCoord, end: endCoord)
+                    await fillRouteGaps(session: session, context: modelContext)
+                    await precacheThumbnails(for: session, scale: scale)
                 }
             }
         }

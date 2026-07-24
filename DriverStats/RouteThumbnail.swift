@@ -49,6 +49,17 @@ final class RouteSnapshotCache {
         files.forEach { try? FileManager.default.removeItem(at: $0) }
     }
 
+    // Shared key used by both RouteThumbnailView and precacheThumbnails so they always
+    // hit the same cache entry.
+    static func key(for session: DriveSession,
+                    size: CGSize = CGSize(width: 76, height: 70),
+                    colorScheme: ColorScheme) -> String {
+        let t  = Int(session.startDate.timeIntervalSinceReferenceDate)
+        let d  = Int(session.totalDistanceM)
+        let cs = colorScheme == .dark ? "dk" : "lt"
+        return "\(t)-\(d)-\(session.driveModeRaw)-\(Int(size.width))x\(Int(size.height))-\(cs)"
+    }
+
     var diskSizeBytes: Int {
         guard let dir = diskDir else { return 0 }
         let files = (try? FileManager.default.contentsOfDirectory(
@@ -126,6 +137,31 @@ func makeRouteThumbnail(
     }
 }
 
+// Renders both light and dark thumbnails for a session and stores them in the cache so the
+// History tab's RouteThumbnailView gets instant hits instead of building on first scroll.
+func precacheThumbnails(for session: DriveSession, scale: CGFloat) async {
+    guard session.totalDistanceM > 0 else { return }
+    let lats = session.routeLatitudes
+    let lons  = session.routeLongitudes
+    guard lats.count >= 2, lats.count == lons.count else { return }
+
+    let size  = CGSize(width: 76, height: 70)
+    let step  = max(1, lats.count / 150)
+    let coords = stride(from: 0, to: lats.count, by: step).map {
+        CLLocationCoordinate2D(latitude: lats[$0], longitude: lons[$0])
+    }
+    let color = session.driveMode.uiColor
+
+    for scheme in [ColorScheme.light, ColorScheme.dark] {
+        let key = RouteSnapshotCache.key(for: session, size: size, colorScheme: scheme)
+        guard RouteSnapshotCache.shared.image(for: key) == nil else { continue }
+        if let img = await makeRouteThumbnail(
+            polylines: [(coords, color)], size: size, scale: scale, colorScheme: scheme) {
+            RouteSnapshotCache.shared.store(img, for: key)
+        }
+    }
+}
+
 // MARK: - RouteThumbnailView
 
 /// Displays a cached MKMapSnapshotter image for a single drive session.
@@ -139,10 +175,7 @@ struct RouteThumbnailView: View {
     @State private var image: UIImage? = nil
 
     private var cacheKey: String {
-        let t = Int(session.startDate.timeIntervalSinceReferenceDate)
-        let d = Int(session.totalDistanceM)
-        let cs = colorScheme == .dark ? "dk" : "lt"
-        return "\(t)-\(d)-\(session.driveModeRaw)-\(Int(size.width))x\(Int(size.height))-\(cs)"
+        RouteSnapshotCache.key(for: session, size: size, colorScheme: colorScheme)
     }
 
     var body: some View {

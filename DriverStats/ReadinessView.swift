@@ -6,12 +6,15 @@
 //
 
 import Combine
+import SwiftData
 import SwiftUI
 
 struct ReadinessView: View {
     @ObservedObject var motion: MotionManager
     @ObservedObject var location: LocationManager
     @Binding var isTracking: Bool
+    @EnvironmentObject private var recorder: SessionRecorder
+    @Environment(\.modelContext) private var modelContext
 
     @State private var countdown: Int? = nil
     @State private var countdownTask: Task<Void, Never>? = nil
@@ -249,6 +252,7 @@ struct ReadinessView: View {
             countdown = nil
             location.startTrack()
             motion.startSession()
+            recorder.begin(location: location, motion: motion, context: modelContext)
             isTracking = true
         }
     }
