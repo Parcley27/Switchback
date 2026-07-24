@@ -26,6 +26,8 @@ struct HistoryStatsView: View {
         List {
             Section("Sessions & Time") {
                 LabeledContent("Total sessions",       value: "\(n)")
+                LabeledContent("Days with drives",     value: "\(stats.totalDaysWithDrives)")
+                LabeledContent("Avg drives / week",    value: String(format: "%.1f", stats.avgDrivesPerWeek))
                 LabeledContent("Total drive time",     value: fmt(stats.totalDurationSeconds))
                 LabeledContent("Total moving time",    value: fmt(stats.totalMovingTimeSeconds))
                 LabeledContent("Total stopped time",   value: fmt(stats.totalStoppingTimeSeconds))
@@ -39,6 +41,9 @@ struct HistoryStatsView: View {
                 LabeledContent("Total distance",       value: String(format: "%.1f km", stats.totalDistanceM / 1000))
                 LabeledContent("Avg session distance", value: String(format: "%.1f km", stats.avgDistanceKm))
                 LabeledContent("Longest drive",        value: String(format: "%.1f km", stats.longestDriveKm))
+                if stats.shortestDriveKm > 0 {
+                    LabeledContent("Shortest drive",   value: String(format: "%.1f km", stats.shortestDriveKm))
+                }
                 LabeledContent("Avg overall speed",    value: String(format: "%.1f km/h", stats.avgOverallSpeedMps * 3.6))
                 LabeledContent("Avg moving speed",     value: String(format: "%.1f km/h", stats.avgMovingSpeedMps * 3.6))
                 LabeledContent("All-time top speed",   value: String(format: "%.1f km/h", stats.topSpeedMps * 3.6))
@@ -64,6 +69,22 @@ struct HistoryStatsView: View {
                 LabeledContent("Best peak braking",    value: String(format: "%.2f g", stats.bestPeakBraking))
                 LabeledContent("Best peak cornering",  value: String(format: "%.2f g", stats.bestPeakCornering))
                 LabeledContent("Avg RMS net",          value: String(format: "%.3f g", stats.avgRmsNet))
+                LabeledContent("Best peak jerk",       value: String(format: "%.2f g/s", stats.bestPeakJerk))
+                LabeledContent("Avg peak jerk",        value: String(format: "%.2f g/s", stats.avgPeakJerk))
+            }
+
+            Section("Drive Modes") {
+                LabeledContent("Normal",               value: "\(stats.normalSessionCount)")
+                LabeledContent("Off-road",             value: "\(stats.offroadSessionCount)")
+                LabeledContent("Racing",               value: "\(stats.racingSessionCount)")
+                if stats.totalLapSplits > 0 {
+                    LabeledContent("Total lap splits", value: "\(stats.totalLapSplits)")
+                }
+            }
+
+            Section("Data") {
+                LabeledContent("Estimated size",       value: stats.totalRawBytes.formattedBytes)
+                LabeledContent("Avg per drive",        value: (n == 0 ? 0 : stats.totalRawBytes / n).formattedBytes)
             }
         }
         .listStyle(.insetGrouped)

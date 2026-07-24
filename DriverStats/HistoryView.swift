@@ -376,6 +376,19 @@ private struct HistoryListContent: View {
             }
         } else {
             List(selection: $selection) {
+                // Filter chips — always at the top
+                Section {
+                    FilterChipRow(
+                        activeTimeFilter: $activeTimeFilter,
+                        activeDurationFilter: $activeDurationFilter,
+                        useCustomRange: $useCustomRange,
+                        showDateRangePicker: $showDateRangePicker
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                }
+
                 // Aggregate stats + smoothness trend
                 // HistoryStatsHeader is Equatable; SwiftUI skips re-evaluation while
                 // sessions are unchanged, so typing/filter/edit-mode changes don't
@@ -410,19 +423,6 @@ private struct HistoryListContent: View {
                             .foregroundStyle(.secondary)
                             .tracking(0.3)
                     }
-                }
-
-                // Filter chips
-                Section {
-                    FilterChipRow(
-                        activeTimeFilter: $activeTimeFilter,
-                        activeDurationFilter: $activeDurationFilter,
-                        useCustomRange: $useCustomRange,
-                        showDateRangePicker: $showDateRangePicker
-                    )
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                 }
 
                 // Drive cards — date-grouped when not filtering, flat when filtering

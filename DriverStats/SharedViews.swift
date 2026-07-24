@@ -172,13 +172,14 @@ struct StatCell: View {
     var sub: String? = nil
     var accent: Bool = false
     var cardBackground: Color = Color(.secondarySystemGroupedBackground)
+    var valueSize: CGFloat = 21
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(size: 21, weight: .semibold, design: .monospaced))
+                    .font(.system(size: valueSize, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
                     .foregroundStyle(accent ? Color.accentColor : Color(.label))
                 if let unit { Text(unit).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary) }

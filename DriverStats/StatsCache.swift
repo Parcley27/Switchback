@@ -33,6 +33,17 @@ struct CachedStats: Codable {
     let bestPeakCornering: Double
     let avgRmsNet: Double
     let trendScores: [Int]
+    // Additional stats
+    let shortestDriveKm: Double
+    let totalDaysWithDrives: Int
+    let avgDrivesPerWeek: Double
+    let totalRawBytes: Int
+    let normalSessionCount: Int
+    let offroadSessionCount: Int
+    let racingSessionCount: Int
+    let bestPeakJerk: Double
+    let avgPeakJerk: Double
+    let totalLapSplits: Int
 
     static func build(from sessions: [DriveSession]) -> CachedStats {
         let n = sessions.count
@@ -42,6 +53,21 @@ struct CachedStats: Codable {
         let totalStopping = sessions.reduce(0.0) { $0 + $1.stoppingTimeSeconds }
         let totalStops = sessions.reduce(0) { $0 + $1.stopCount }
         let scores: [Double] = sessions.map { $0.smoothnessScore }
+
+        // Calendar days
+        let calendar = Calendar.current
+        let uniqueDays = Set(sessions.map { calendar.startOfDay(for: $0.startDate) })
+
+        // Avg drives/week: span from earliest to latest date, minimum 1 week
+        let firstDate = sessions.map { $0.startDate }.min()
+        let lastDate = sessions.map { $0.startDate }.max()
+        let spanWeeks: Double
+        if let first = firstDate, let last = lastDate {
+            let spanSeconds = last.timeIntervalSince(first)
+            spanWeeks = max(1.0, spanSeconds / (7 * 24 * 3600))
+        } else {
+            spanWeeks = 1.0
+        }
 
         return CachedStats(
             totalDurationSeconds: totalDur,
@@ -69,7 +95,17 @@ struct CachedStats: Codable {
             bestPeakBraking: sessions.map { abs($0.peakBraking) }.max() ?? 0,
             bestPeakCornering: sessions.map { max($0.peakRight, abs($0.peakLeft)) }.max() ?? 0,
             avgRmsNet: n == 0 ? 0 : sessions.reduce(0.0) { $0 + $1.rmsNet } / Double(n),
-            trendScores: Array(sessions.prefix(12).reversed().map { Int($0.smoothnessScore) })
+            trendScores: Array(sessions.prefix(12).reversed().map { Int($0.smoothnessScore) }),
+            shortestDriveKm: sessions.map { $0.totalDistanceM / 1000 }.filter { $0 > 0 }.min() ?? 0,
+            totalDaysWithDrives: uniqueDays.count,
+            avgDrivesPerWeek: n == 0 ? 0 : Double(n) / spanWeeks,
+            totalRawBytes: sessions.reduce(0) { $0 + $1.estimatedSizeBytes },
+            normalSessionCount: sessions.filter { $0.driveModeRaw == 0 }.count,
+            offroadSessionCount: sessions.filter { $0.driveModeRaw == 1 }.count,
+            racingSessionCount: sessions.filter { $0.driveModeRaw == 2 }.count,
+            bestPeakJerk: sessions.map { $0.peakNetJerk }.max() ?? 0,
+            avgPeakJerk: n == 0 ? 0 : sessions.reduce(0.0) { $0 + $1.peakNetJerk } / Double(n),
+            totalLapSplits: sessions.reduce(0) { $0 + $1.lapSplitSeconds.count }
         )
     }
 }

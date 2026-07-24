@@ -68,15 +68,15 @@ struct TrackingView: View {
     private var timerSpeedPage: some View {
         VStack(spacing: 0) {
             Spacer()
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 HStack(spacing: 6) {
-                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                    Circle().fill(Color.red).frame(width: 10, height: 10)
                     Text("REC")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.red)
                 }
                 Text(stats.map { formatDuration($0.durationSeconds) } ?? "0:00")
-                    .font(.system(size: 64, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 88, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
                     .foregroundStyle(Color(.label))
             }
@@ -86,7 +86,7 @@ struct TrackingView: View {
                 max: 200,
                 unit: "km/h",
                 label: "speed",
-                size: 220,
+                size: 250,
                 zone: .accentColor,
                 bigValue: true
             )
@@ -105,13 +105,13 @@ struct TrackingView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text("g-g Diagram")
-                            .font(.footnote.weight(.medium))
+                            .font(.subheadline.weight(.medium))
                             .textCase(.uppercase)
                             .foregroundStyle(.secondary)
                             .tracking(0.3)
                         Spacer()
                         Text("live")
-                            .font(.caption2.monospaced())
+                            .font(.caption.monospaced())
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 20)
@@ -131,17 +131,17 @@ struct TrackingView: View {
                     VStack(spacing: 0) {
                         HStack(spacing: 0) {
                             Text("Axis")
-                                .font(.caption.weight(.medium))
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text("Live")
-                                .font(.caption.weight(.medium))
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 82, alignment: .trailing)
+                                .frame(width: 104, alignment: .trailing)
                             Text("Peak")
-                                .font(.caption.weight(.medium))
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.accentColor)
-                                .frame(width: 82, alignment: .trailing)
+                                .frame(width: 104, alignment: .trailing)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -173,31 +173,31 @@ struct TrackingView: View {
                     columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2),
                     spacing: 10
                 ) {
-                    StatCell(label: "Distance",    value: stats.map { formatDistance($0.totalDistanceM) } ?? "—",        cardBackground: Color(.secondarySystemBackground))
-                    StatCell(label: "Moving time", value: stats.map { formatDuration($0.movingTimeSeconds) } ?? "—",     cardBackground: Color(.secondarySystemBackground))
-                    StatCell(label: "Max speed",   value: stats.map { String(format: "%.0f km/h", $0.maxSpeedMps * 3.6) } ?? "—", cardBackground: Color(.secondarySystemBackground))
-                    StatCell(label: "Stops",       value: stats.map { "\($0.stopCount)" } ?? "—",                        cardBackground: Color(.secondarySystemBackground))
+                    StatCell(label: "Distance",    value: stats.map { formatDistance($0.totalDistanceM) } ?? "—",        cardBackground: Color(.secondarySystemBackground), valueSize: 28)
+                    StatCell(label: "Moving time", value: stats.map { formatDuration($0.movingTimeSeconds) } ?? "—",     cardBackground: Color(.secondarySystemBackground), valueSize: 28)
+                    StatCell(label: "Max speed",   value: stats.map { String(format: "%.0f km/h", $0.maxSpeedMps * 3.6) } ?? "—", cardBackground: Color(.secondarySystemBackground), valueSize: 28)
+                    StatCell(label: "Stops",       value: stats.map { "\($0.stopCount)" } ?? "—",                        cardBackground: Color(.secondarySystemBackground), valueSize: 28)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Hard Events")
-                            .font(.footnote.weight(.medium))
+                            .font(.subheadline.weight(.medium))
                             .textCase(.uppercase)
                             .foregroundStyle(.secondary)
                             .tracking(0.3)
                         Spacer()
                         Text(String(format: "threshold %.2f g", motion.hardThresholdG))
-                            .font(.caption2.monospaced())
+                            .font(.caption.monospaced())
                             .foregroundStyle(.tertiary)
                     }
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
                         spacing: 10
                     ) {
-                        StatCell(label: "Accel",  value: "\(stats?.hardAccelCount ?? 0)",     accent: true, cardBackground: Color(.secondarySystemBackground))
-                        StatCell(label: "Brake",  value: "\(stats?.hardBrakingCount ?? 0)",   accent: true, cardBackground: Color(.secondarySystemBackground))
-                        StatCell(label: "Corner", value: "\(stats?.hardCorneringCount ?? 0)", accent: true, cardBackground: Color(.secondarySystemBackground))
+                        StatCell(label: "Accel",  value: "\(stats?.hardAccelCount ?? 0)",     accent: true, cardBackground: Color(.secondarySystemBackground), valueSize: 28)
+                        StatCell(label: "Brake",  value: "\(stats?.hardBrakingCount ?? 0)",   accent: true, cardBackground: Color(.secondarySystemBackground), valueSize: 28)
+                        StatCell(label: "Corner", value: "\(stats?.hardCorneringCount ?? 0)", accent: true, cardBackground: Color(.secondarySystemBackground), valueSize: 28)
                     }
                 }
             }
@@ -227,20 +227,20 @@ struct TrackingView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Text(label)
-                    .font(.body)
+                    .font(.headline)
                     .foregroundStyle(Color(.label))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(liveValue)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(.title3, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .frame(width: 82, alignment: .trailing)
+                    .frame(width: 104, alignment: .trailing)
                 Text(peakValue)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(.title3, design: .monospaced))
                     .foregroundStyle(Color.accentColor)
-                    .frame(width: 82, alignment: .trailing)
+                    .frame(width: 104, alignment: .trailing)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 13)
+            .padding(.vertical, 15)
             if !isLast {
                 Divider().padding(.leading, 16)
             }
